@@ -3164,6 +3164,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
+            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
 
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
             ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
@@ -3178,6 +3179,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
+            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
 
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
             ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
@@ -3192,6 +3194,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
+            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
 
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
@@ -3218,6 +3221,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
+            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
 
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
