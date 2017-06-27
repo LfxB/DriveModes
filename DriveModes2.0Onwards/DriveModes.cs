@@ -1896,14 +1896,14 @@ namespace DrivingModes
             float heading = recentVeh.Heading;
             bool engineState = recentVeh.EngineRunning;
             float speed = recentVeh.Speed;
-            float rpm = recentVeh.CurrentRPM;
+            //float rpm = recentVeh.CurrentRPM; //Requires SHVDN update due to memory offset changes.
 
             float lastBodyHealth = recentVeh.BodyHealth;
             float lastEngHealth = recentVeh.EngineHealth;
             float lastTankHealth = recentVeh.PetrolTankHealth;
             int lastHealth = recentVeh.Health;
             float dirtLevel = recentVeh.DirtLevel;
-            float fuelLevel = recentVeh.FuelLevel;
+            //float fuelLevel = recentVeh.FuelLevel; //Requires SHVDN update due to memory offset changes.
 
             int radio = Function.Call<int>(Hash.GET_PLAYER_RADIO_STATION_INDEX);
 
@@ -2013,7 +2013,7 @@ namespace DrivingModes
                 Function.Call(Hash.SET_VEH_RADIO_STATION, newVeh, "OFF");
             }
 
-            newVeh.CurrentRPM = rpm;
+            //newVeh.CurrentRPM = rpm; //Requires SHVDN update due to memory offset changes.
             newVeh.NumberPlate = plate;
             newVeh.NumberPlateType = plateType;
             newVeh.WindowTint = winTint;
@@ -2065,7 +2065,7 @@ namespace DrivingModes
             newVeh.PetrolTankHealth = lastTankHealth;
             newVeh.Health = lastHealth;
             newVeh.DirtLevel = dirtLevel;
-            newVeh.FuelLevel = fuelLevel;
+            //newVeh.FuelLevel = fuelLevel; //Requires SHVDN update due to memory offset changes.
         }
 
         bool ExtraExist(Vehicle v, int i)
@@ -3164,7 +3164,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
+            handlingOffset = (gameVersion > 35 ? 0x888 : handlingOffset);
 
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
             ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
@@ -3179,7 +3179,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
+            handlingOffset = (gameVersion > 35 ? 0x888 : handlingOffset);
 
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
             ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
@@ -3194,7 +3194,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
+            handlingOffset = (gameVersion > 35 ? 0x888 : handlingOffset);
 
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
@@ -3221,7 +3221,7 @@ namespace DrivingModes
             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
             handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
             handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 29 ? 0x888 : handlingOffset);
+            handlingOffset = (gameVersion > 35 ? 0x888 : handlingOffset);
 
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
