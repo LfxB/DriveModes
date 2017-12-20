@@ -13,6 +13,7 @@ using CheatEngine;
 using SimpleUI;
 using ScriptCommunicatorHelper;
 using Control = GTA.Control;
+using static LeMemoryAccess.MemoryAccess;
 
 namespace DrivingModes
 {
@@ -40,6 +41,7 @@ namespace DrivingModes
         string LastUsedVehicleHash;
         int LastUsedSpecialVehicleIndex;
         string LastUsedVehicleName;
+        string LastUsedVehicleHashForCamera;
 
         Camera CustomVehicleCam;
         int CamCurrentMode;
@@ -61,6 +63,8 @@ namespace DrivingModes
 
         int InputTimer;
 
+        bool _initMemory;
+
         //IEnumerator<bool> EditorLoop;
 
         MenuPool _menuPool;
@@ -70,12 +74,15 @@ namespace DrivingModes
 
         UIMenu VehicleEditorMenu;
         UIMenuItem ItemConfigSelect;
+        UIMenuItem ItemMass;
+        UIMenuItem ItemInitialDragCoeff;
         UIMenuItem ItemCentreOfMassX;
         UIMenuItem ItemCentreOfMassY;
         UIMenuItem ItemCentreOfMassZ;
         UIMenuItem ItemInertiaMultiplierX;
         UIMenuItem ItemInertiaMultiplierY;
         UIMenuItem ItemInertiaMultiplierZ;
+        UIMenuItem ItemPercentSubmerged;
         UIMenuItem ItemDriveBiasFront;
         UIMenuItem ItemnInitialDriveGears;
         UIMenuItem ItemDriveInertia;
@@ -105,6 +112,10 @@ namespace DrivingModes
         UIMenuItem ItemAntiRollBarBiasFront;
         UIMenuItem ItemRollCentreHeightFront;
         UIMenuItem ItemRollCentreHeightRear;
+        UIMenuItem ItemCollisionDamageMult;
+        UIMenuItem ItemWeaponDamageMult;
+        UIMenuItem ItemDeformationDamageMult;
+        UIMenuItem ItemEngineDamageMult;
         UIMenuItem ItemDeleteConfig;
         UIMenuItem ItemSaveConfigNew;
         UIMenuItem ItemSaveConfig;
@@ -140,7 +151,7 @@ namespace DrivingModes
                 using (StreamWriter sw = new StreamWriter(@"scripts\DrivingModes.scmod"))
                 {
                     sw.WriteLine("Drive Modes");
-                    sw.WriteLine("Version 2.0.1");
+                    sw.WriteLine("Version 2.0.5");
                 }
             }
 
@@ -159,8 +170,14 @@ namespace DrivingModes
             Tick += OnTick;
             KeyDown += OnKeyDown;
             KeyUp += OnKeyUp;
+            Aborted += OnAbort;
 
             Interval = 0;
+        }
+
+        private void OnAbort(object sender, EventArgs e)
+        {
+            CustomVehicleCam = null;
         }
 
         void SetupKeyboardCulture()
@@ -201,23 +218,31 @@ namespace DrivingModes
             MainMenu.DefaultBoxColor = Color.FromArgb(230, 0, 0, 0);
             MainMenu.DefaultTextColor = Color.FromArgb(255, 255, 255, 255);
             MainMenu.TitleUnderlineColor = Color.FromArgb(80, 150, 255, 255);
+            MainMenu.UseEventBasedControls = false;
 
             ItemAddVehicleToList = new UIMenuItem("Create Initial Config", null, "If \"1st - Default.cfg\" already exists, it will be overwritten by the vehicle's current handling data. This will also give the current vehicle its own camera settings.");
             MainMenu.AddMenuItem(ItemAddVehicleToList);
 
             VehicleEditorMenu = new UIMenu("Vehicle Editor");
             _menuPool.AddSubMenu(VehicleEditorMenu, MainMenu, VehicleEditorMenu.Title);
+            VehicleEditorMenu.UseEventBasedControls = false;
 
             ItemConfigSelect = new UIMenuItem("Current Drive Mode", null, "Select your config.");
             VehicleEditorMenu.AddMenuItem(ItemConfigSelect);
 
-            ItemCentreOfMassX = new UIMenuItem("vecCentreOfMassOffsetX", null, "This value shifts the center of gravity in meters from side to side (when in vehicle looking forward). 0.0 means that the center of gravity will be in the center of the vehicle. Positive values move the centre of gravity right.");
+            ItemMass = new UIMenuItem("fMass", null, "The weight of the vehicle. Values should be given in Kilograms. Used when the vehicle collides with another vehicle or a non-static object.");
+            VehicleEditorMenu.AddMenuItem(ItemMass);
+
+            ItemInitialDragCoeff = new UIMenuItem("fInitialDragCoeff", null, "Sets the drag coefficient of the vehicle. Increase to simulate aerodynamic drag. Value: 10-120");
+            VehicleEditorMenu.AddMenuItem(ItemInitialDragCoeff);
+
+            ItemCentreOfMassX = new UIMenuItem("vecCentreOfMassOffsetX", null, "This value shifts the center of gravity in meters from side to side (when in vehicle looking forward). 0.0 means that the center of gravity will be in the center of the vehicle. Positive values move the centre of gravity rightwards.");
             VehicleEditorMenu.AddMenuItem(ItemCentreOfMassX);
 
             ItemCentreOfMassY = new UIMenuItem("vecCentreOfMassOffsetY", null, "This value shifts the center of gravity in meters from side to side (when in vehicle looking forward). 0.0 means that the center of gravity will be in the center of the vehicle. Positive values move the centre of gravity forwards.");
             VehicleEditorMenu.AddMenuItem(ItemCentreOfMassY);
 
-            ItemCentreOfMassZ = new UIMenuItem("vecCentreOfMassOffsetZ", null, "This value shifts the center of gravity in meters from side to side (when in vehicle looking forward). 0.0 means that the center of gravity will be in the center of the vehicle. Positive values move the centre of gravity up. Changing this value to great negative quantities (E.G. -10 or greater) will cause the vehicle to behave erratically, moving many feet per frame.");
+            ItemCentreOfMassZ = new UIMenuItem("vecCentreOfMassOffsetZ", null, "This value shifts the center of gravity in meters from side to side (when in vehicle looking forward). 0.0 means that the center of gravity will be in the center of the vehicle. Positive values move the centre of gravity upwards. Changing this value to great negative quantities (E.G. -10 or greater) will cause the vehicle to behave erratically, moving many feet per frame.");
             VehicleEditorMenu.AddMenuItem(ItemCentreOfMassZ);
 
             ItemInertiaMultiplierX = new UIMenuItem("vecInertiaMultiplierX", null, "Not sure what this does!");
@@ -228,6 +253,9 @@ namespace DrivingModes
 
             ItemInertiaMultiplierZ = new UIMenuItem("vecInertiaMultiplierZ", null, "Not sure what this does!");
             VehicleEditorMenu.AddMenuItem(ItemInertiaMultiplierZ);
+
+            ItemPercentSubmerged = new UIMenuItem("fPercentSubmerged", null, "The percentage of the vehicle's 'floating height' after it falls into the water, before sinking. Default - 0.85 (85%) for vanilla, land vehicles. Value range: 0.0 - 1.0");
+            VehicleEditorMenu.AddMenuItem(ItemPercentSubmerged);
 
             ItemDriveBiasFront = new UIMenuItem("fDriveBiasFront", null, "0.0 is rear wheel drive, 1.0 is front wheel drive, and any value between 0.01 and 0.99 is four wheel drive (0.5 give both front and rear axles equal force, being perfect 4WD.)");
             VehicleEditorMenu.AddMenuItem(ItemDriveBiasFront);
@@ -277,7 +305,7 @@ namespace DrivingModes
             ItemLowSpeedTractionLossMult = new UIMenuItem("fLowSpeedTractionLossMult", null, "How much traction is reduced at low speed, 0.0 means normal traction. It affects mainly car burnout (spinning wheels when car doesn't move) when pressing gas. Decreasing value will cause less burnout, less sliding at start. However, the higher value, the more burnout car gets. Optimal is 1.0.");
             VehicleEditorMenu.AddMenuItem(ItemLowSpeedTractionLossMult);
 
-            ItemCamberStiffness = new UIMenuItem("fCamberStiffness", null, "This value modify the grip of the car when you're drifting and you release the gas. In general, it makes your car slide more on sideways movement. More than 0 make the car sliding on the same angle you're drifting and less than 0 make your car oversteer (not recommend to use more than 0.1 / -0.1 if you don't know what you're doing). This value depend of the others, and is better to modify when your handling is finished (or quasi finished). Not recommended to modify it for grip.");
+            ItemCamberStiffness = new UIMenuItem("fCamberStiffness", null, "This value modify the grip of the car when you're drifting and you release the gas. In general, it makes your car slide more on sideways movement. More than 0 make the car sliding on the same angle you're drifting and less than 0 make your car oversteer (not recommend to use more than 0.1 / -0.1).");
             VehicleEditorMenu.AddMenuItem(ItemCamberStiffness);
 
             ItemTractionBiasFront = new UIMenuItem("fTractionBiasFront", null, "Determines the distribution of traction from front to rear. Range: 0.01 - 0.99. 0.01 = only rear axle has traction. 0.99 = only front axle has traction. 0.5 = both axles have equal traction.");
@@ -316,6 +344,18 @@ namespace DrivingModes
             ItemRollCentreHeightRear = new UIMenuItem("fRollCentreHeightRear", null, "This value modifies the weight transmission during an acceleration between the front and rear (and can affect the acceleration speed). A negative value will make the weight more important at the rear when you accelerate, and a positive will make your weight more important on the front. A positive value is visually unrealistic. Best to do is to only go between 0.15/-0.15.");
             VehicleEditorMenu.AddMenuItem(ItemRollCentreHeightRear);
 
+            ItemCollisionDamageMult = new UIMenuItem("fCollisionDamageMult", null, "Multiplies the game's calculation of damage to the vehicle by collision. Value: 0.0 - 10.0");
+            VehicleEditorMenu.AddMenuItem(ItemCollisionDamageMult);
+
+            ItemWeaponDamageMult = new UIMenuItem("fWeaponDamageMult", null, "Multiplies the game's calculation of damage to the vehicle by weapons. Value: 0.0 - 10.0");
+            VehicleEditorMenu.AddMenuItem(ItemWeaponDamageMult);
+
+            ItemDeformationDamageMult = new UIMenuItem("fDeformationDamageMult", null, "Multiplies the game's calculation of deformation damage. Value: 0.0 - 10.0");
+            VehicleEditorMenu.AddMenuItem(ItemDeformationDamageMult);
+
+            ItemEngineDamageMult = new UIMenuItem("fEngineDamageMult", null, "Multiplies the game's calculation of damage to the engine, causing explosion or engine failure. Value: 0.0 - 10.0");
+            VehicleEditorMenu.AddMenuItem(ItemEngineDamageMult);
+
             ItemDeleteConfig = new UIMenuItem("Delete current config", null, "There is no confirmation warning so be careful!");
             VehicleEditorMenu.AddMenuItem(ItemDeleteConfig);
 
@@ -333,6 +373,7 @@ namespace DrivingModes
 
             CameraSettingsMenu = new UIMenu("Camera Editor");
             _menuPool.AddSubMenu(CameraSettingsMenu, MainMenu, CameraSettingsMenu.Title);
+            CameraSettingsMenu.UseEventBasedControls = false;
 
             ItemCameraSwitch = new UIMenuItem("Current Camera", "DefaultGameplayCam");
             CameraSettingsMenu.AddMenuItem(ItemCameraSwitch);
@@ -583,12 +624,15 @@ namespace DrivingModes
 
             //The default values are taken from the Adder
 
+            config.HandlingData._fMass = setting.GetValue<float>("Handling", "fMass", HandlingUtils.GetMass());
+            config.HandlingData._fInitialDragCoeff = setting.GetValue<float>("Handling", "fInitialDragCoeff", HandlingUtils.GetInitialDragCoeff());
             config.HandlingData._vecCentreOfMassX = setting.GetValue<float>("Handling", "vecCentreOfMassOffsetX", HandlingUtils.GetCentreOfMassX());
             config.HandlingData._vecCentreOfMassY = setting.GetValue<float>("Handling", "vecCentreOfMassOffsetY", HandlingUtils.GetCentreOfMassY());
             config.HandlingData._vecCentreOfMassZ = setting.GetValue<float>("Handling", "vecCentreOfMassOffsetZ", HandlingUtils.GetCentreOfMassZ());
             config.HandlingData._vecInertiaMultiplierX = setting.GetValue<float>("Handling", "vecInertiaMultiplierX", HandlingUtils.GetInertiaMultiplierX());
             config.HandlingData._vecInertiaMultiplierY = setting.GetValue<float>("Handling", "vecInertiaMultiplierY", HandlingUtils.GetInertiaMultiplierY());
             config.HandlingData._vecInertiaMultiplierZ = setting.GetValue<float>("Handling", "vecInertiaMultiplierZ", HandlingUtils.GetInertiaMultiplierZ());
+            config.HandlingData._fPercentSubmerged = setting.GetValue<float>("Handling", "fPercentSubmerged", HandlingUtils.GetPercentSubmerged());
             config.HandlingData._fDriveBiasFront = setting.GetValue<float>("Handling", "fDriveBiasFront", HandlingUtils.GetDriveBiasFront());
             config.HandlingData._nInitialGears = setting.GetValue<sbyte>("Handling", "nInitialDriveGears", (sbyte)HandlingUtils.GetnInitialDriveGears());
             config.HandlingData._fDriveInertia = setting.GetValue<float>("Handling", "fDriveInertia", HandlingUtils.GetDriveInertia());
@@ -618,6 +662,10 @@ namespace DrivingModes
             config.HandlingData._fAntiRollBarBiasFront = setting.GetValue<float>("Handling", "fAntiRollBarBiasFront", HandlingUtils.GetAntiRollBarBiasFront());
             config.HandlingData._fRollCentreHeightFront = setting.GetValue<float>("Handling", "fRollCentreHeightFront", HandlingUtils.GetRollCentreHeightFront());
             config.HandlingData._fRollCentreHeightRear = setting.GetValue<float>("Handling", "fRollCentreHeightRear", HandlingUtils.GetRollCentreHeightRear());
+            config.HandlingData._fCollisionDamageMult = setting.GetValue<float>("Handling", "_fCollisionDamageMult", HandlingUtils.GetCollisionDamageMult());
+            config.HandlingData._fWeaponDamageMult = setting.GetValue<float>("Handling", "_fWeaponDamageMult", HandlingUtils.GetWeaponDamageMult());
+            config.HandlingData._fDeformationDamageMult = setting.GetValue<float>("Handling", "_fDeformationDamageMult", HandlingUtils.GetDeformationDamageMult());
+            config.HandlingData._fEngineDamageMult = setting.GetValue<float>("Handling", "_fEngineDamageMult", HandlingUtils.GetEngineDamageMult());
         }
 
         void SaveCurrentHandlingToConfig(Configs config)
@@ -627,12 +675,15 @@ namespace DrivingModes
 
             ScriptSettings setting = ScriptSettings.Load(config.FullPath);
 
+            setting.SetValue<float>("Handling", "fMass", config.HandlingData._fMass);
+            setting.SetValue<float>("Handling", "fInitialDragCoeff", config.HandlingData._fInitialDragCoeff);
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetX", config.HandlingData._vecCentreOfMassX);
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetY", config.HandlingData._vecCentreOfMassY);
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetZ", config.HandlingData._vecCentreOfMassZ);
             setting.SetValue<float>("Handling", "vecInertiaMultiplierX", config.HandlingData._vecInertiaMultiplierX);
             setting.SetValue<float>("Handling", "vecInertiaMultiplierY", config.HandlingData._vecInertiaMultiplierY);
             setting.SetValue<float>("Handling", "vecInertiaMultiplierZ", config.HandlingData._vecInertiaMultiplierZ);
+            setting.SetValue<float>("Handling", "fPercentSubmerged", config.HandlingData._fPercentSubmerged);
             setting.SetValue<float>("Handling", "fDriveBiasFront", config.HandlingData._fDriveBiasFront);
             setting.SetValue<int>("Handling", "nInitialDriveGears", config.HandlingData._nInitialGears);
             setting.SetValue<float>("Handling", "fDriveInertia", config.HandlingData._fDriveInertia);
@@ -662,6 +713,10 @@ namespace DrivingModes
             setting.SetValue<float>("Handling", "fAntiRollBarBiasFront", config.HandlingData._fAntiRollBarBiasFront);
             setting.SetValue<float>("Handling", "fRollCentreHeightFront", config.HandlingData._fRollCentreHeightFront);
             setting.SetValue<float>("Handling", "fRollCentreHeightRear", config.HandlingData._fRollCentreHeightRear);
+            setting.SetValue<float>("Handling", "fCollisionDamageMult", config.HandlingData._fCollisionDamageMult);
+            setting.SetValue<float>("Handling", "fWeaponDamageMult", config.HandlingData._fWeaponDamageMult);
+            setting.SetValue<float>("Handling", "fDeformationDamageMult", config.HandlingData._fDeformationDamageMult);
+            setting.SetValue<float>("Handling", "fEngineDamageMult", config.HandlingData._fEngineDamageMult);
 
             setting.Save();
             UI.Notify("~g~ Settings saved!");
@@ -674,12 +729,15 @@ namespace DrivingModes
 
             ScriptSettings setting = ScriptSettings.Load(path);
 
+            setting.SetValue<float>("Handling", "fMass", HandlingUtils.GetMass());
+            setting.SetValue<float>("Handling", "fInitialDragCoeff", HandlingUtils.GetInitialDragCoeff());
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetX", HandlingUtils.GetCentreOfMassX());
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetY", HandlingUtils.GetCentreOfMassY());
             setting.SetValue<float>("Handling", "vecCentreOfMassOffsetZ", HandlingUtils.GetCentreOfMassZ());
             setting.SetValue<float>("Handling", "vecInertiaMultiplierX", HandlingUtils.GetInertiaMultiplierX());
             setting.SetValue<float>("Handling", "vecInertiaMultiplierY", HandlingUtils.GetInertiaMultiplierY());
             setting.SetValue<float>("Handling", "vecInertiaMultiplierZ", HandlingUtils.GetInertiaMultiplierZ());
+            setting.SetValue<float>("Handling", "fPercentSubmerged", HandlingUtils.GetPercentSubmerged());
             setting.SetValue<float>("Handling", "fDriveBiasFront", HandlingUtils.GetDriveBiasFront());
             setting.SetValue<int>("Handling", "nInitialDriveGears", HandlingUtils.GetnInitialDriveGears());
             setting.SetValue<float>("Handling", "fDriveInertia", HandlingUtils.GetDriveInertia());
@@ -709,6 +767,10 @@ namespace DrivingModes
             setting.SetValue<float>("Handling", "fAntiRollBarBiasFront", HandlingUtils.GetAntiRollBarBiasFront());
             setting.SetValue<float>("Handling", "fRollCentreHeightFront", HandlingUtils.GetRollCentreHeightFront());
             setting.SetValue<float>("Handling", "fRollCentreHeightRear", HandlingUtils.GetRollCentreHeightRear());
+            setting.SetValue<float>("Handling", "fCollisionDamageMult", HandlingUtils.GetCollisionDamageMult());
+            setting.SetValue<float>("Handling", "fWeaponDamageMult", HandlingUtils.GetWeaponDamageMult());
+            setting.SetValue<float>("Handling", "fDeformationDamageMult", HandlingUtils.GetDeformationDamageMult());
+            setting.SetValue<float>("Handling", "fEngineDamageMult", HandlingUtils.GetEngineDamageMult());
 
             setting.Save();
             UI.Notify("~g~ Settings saved!");
@@ -827,14 +889,21 @@ namespace DrivingModes
 
         void OnTick(object sender, EventArgs e) // This is where most of your script goes
         {
-
-            //1.0f - (GetHandlingValue(fDriveBiasRear) / 2.0f)
-            /*if (Game.IsControlJustPressed(2, Control.VehicleHandbrake))
+            if (!_initMemory)
             {
-                string temp = HandlingUtils.GetDriveBiasFrontExact().ToString();
-                string temp2 = HandlingUtils.GetDriveBiasRearExact().ToString();
-                UI.ShowSubtitle("front: " + temp + ", rear" + temp2 + ", actual: " + HandlingUtils.GetDriveBiasFront().ToString());
-            }*/
+                HandlingUtils.Init();
+                Wait(500);
+                _initMemory = true;
+            }
+
+            if (Game.Player.Character.IsInVehicle())
+            {
+                if (((VehicleHash)Game.Player.Character.CurrentVehicle.Model.Hash).ToString() != LastUsedVehicleHashForCamera)
+                {
+                    LoadAppropriateCameraSettings();
+                    LastUsedVehicleHashForCamera = ((VehicleHash)Game.Player.Character.CurrentVehicle.Model.Hash).ToString();
+                }
+            }
 
             if (isVehicleSpecial(Game.Player.Character.CurrentVehicle))
             {
@@ -913,6 +982,7 @@ namespace DrivingModes
                                 ReadVehicles();
                                 SetupDisplayMenu();
                                 LoadINISettings();
+                                UI.Notify("~g~ Settings Reloaded!");
                             }
 
                             MainMenu.SetInputWait();
@@ -942,47 +1012,55 @@ namespace DrivingModes
 
                                         ItemConfigSelect.Value = conf.ConfigName;
 
-                                        conf.HandlingData.CentreOfMassX = VehicleEditorMenu.ControlFloatValue(ItemCentreOfMassX, conf.HandlingData._vecCentreOfMassX, 0.01f, 1f, 6);
-                                        conf.HandlingData.CentreOfMassY = VehicleEditorMenu.ControlFloatValue(ItemCentreOfMassY, conf.HandlingData._vecCentreOfMassY, 0.01f, 1f, 6);
-                                        conf.HandlingData.CentreOfMassZ = VehicleEditorMenu.ControlFloatValue(ItemCentreOfMassZ, conf.HandlingData._vecCentreOfMassZ, 0.01f, 1f, 6);
-                                        conf.HandlingData.InertiaMultiplierX = VehicleEditorMenu.ControlFloatValue(ItemInertiaMultiplierX, conf.HandlingData._vecInertiaMultiplierX, 0.01f, 1f, 6);
-                                        conf.HandlingData.InertiaMultiplierY = VehicleEditorMenu.ControlFloatValue(ItemInertiaMultiplierY, conf.HandlingData._vecInertiaMultiplierY, 0.01f, 1f, 6);
-                                        conf.HandlingData.InertiaMultiplierZ = VehicleEditorMenu.ControlFloatValue(ItemInertiaMultiplierZ, conf.HandlingData._vecInertiaMultiplierZ, 0.01f, 1f, 6);
-                                        conf.HandlingData.DriveBiasFront = VehicleEditorMenu.ControlFloatValue(ItemDriveBiasFront, conf.HandlingData._fDriveBiasFront, 0.01f, 1f, 6);
-                                        conf.HandlingData.nInitialDriveGears = (sbyte)VehicleEditorMenu.ControlIntValue(ItemnInitialDriveGears, conf.HandlingData._nInitialGears, 1, 2);
-                                        conf.HandlingData.DriveInertia = VehicleEditorMenu.ControlFloatValue(ItemDriveInertia, conf.HandlingData._fDriveInertia, 0.01f, 1f, 6);
-                                        conf.HandlingData.ClutchChangeRateScaleUpShift = VehicleEditorMenu.ControlFloatValue(ItemClutchChangeRateScaleUpShift, conf.HandlingData._fClutchChangeRateScaleUpShift, 0.01f, 1f, 6);
-                                        conf.HandlingData.ClutchChangeRateScaleDownShift = VehicleEditorMenu.ControlFloatValue(ItemClutchChangeRateScaleDownShift, conf.HandlingData._fClutchChangeRateScaleDownShift, 0.01f, 1f, 6);
-                                        conf.HandlingData.InitialDriveForce = VehicleEditorMenu.ControlFloatValue(ItemInitialDriveForce, conf.HandlingData._fInitialDriveForce, 0.001f, 1f, 6);
-                                        conf.HandlingData.InitialDriveMaxFlatVel = VehicleEditorMenu.ControlFloatValue(ItemInitialDriveMaxFlatVel, conf.HandlingData._fInitialDriveMaxFlatVel, 0.01f, 1f, 6);
-                                        conf.HandlingData.BrakeForce = VehicleEditorMenu.ControlFloatValue(ItemBrakeForce, conf.HandlingData._fBrakeForce, 0.01f, 1f, 6);
-                                        conf.HandlingData.BrakeBiasFront = VehicleEditorMenu.ControlFloatValue(ItemBrakeBiasFront, conf.HandlingData._fBrakeBiasFront, 0.01f, 1f, 6);
-                                        conf.HandlingData.HandBrakeForce = VehicleEditorMenu.ControlFloatValue(ItemHandBrakeForce, conf.HandlingData._fHandBrakeForce, 0.01f, 1f, 6);
-                                        conf.HandlingData.SteeringLock = VehicleEditorMenu.ControlFloatValue(ItemSteeringLock, conf.HandlingData._fSteeringLock, 0.1f, 1f, 6);
-                                        conf.HandlingData.TractionCurveMax = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveMax, conf.HandlingData._fTractionCurveMax, 0.01f, 1f, 6);
-                                        conf.HandlingData.TractionCurveMin = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveMin, conf.HandlingData._fTractionCurveMin, 0.01f, 1f, 6);
-                                        conf.HandlingData.TractionCurveLateral = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveLateral, conf.HandlingData._fTractionCurveLateral, 0.01f, 1f, 6);
-                                        conf.HandlingData.TractionSpringDeltaMax = VehicleEditorMenu.ControlFloatValue(ItemTractionSpringDeltaMax, conf.HandlingData._fTractionSprintDeltaMax, 0.01f, 1f, 6);
-                                        conf.HandlingData.LowSpeedTractionLossMult = VehicleEditorMenu.ControlFloatValue(ItemLowSpeedTractionLossMult, conf.HandlingData._fLowSpeedTractionLossMult, 0.01f, 1f, 6);
-                                        conf.HandlingData.CamberStiffness = VehicleEditorMenu.ControlFloatValue(ItemCamberStiffness, conf.HandlingData._fCamberStiffness, 0.01f, 1f, 6);
-                                        conf.HandlingData.TractionBiasFront = VehicleEditorMenu.ControlFloatValue(ItemTractionBiasFront, conf.HandlingData._fTractionBiasFront, 0.001f, 0.01f, 6);
-                                        conf.HandlingData.TractionLossMult = VehicleEditorMenu.ControlFloatValue(ItemTractionLossMult, conf.HandlingData._fTractionLossMult, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionForce = VehicleEditorMenu.ControlFloatValue(ItemSuspensionForce, conf.HandlingData._fSuspensionForce, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionCompDamp = VehicleEditorMenu.ControlFloatValue(ItemSuspensionCompDamp, conf.HandlingData._fSuspensionCompDamp, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionReboundDamp = VehicleEditorMenu.ControlFloatValue(ItemSuspensionReboundDamp, conf.HandlingData._fSuspensionReboundDamp, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionUpperLimit = VehicleEditorMenu.ControlFloatValue(ItemSuspensionUpperLimit, conf.HandlingData._fSuspensionUpperLimit, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionLowerLimit = VehicleEditorMenu.ControlFloatValue(ItemSuspensionLowerLimit, conf.HandlingData._fSuspensionLowerLimit, 0.01f, 1f, 6);
-                                        conf.HandlingData.SuspensionBiasFront = VehicleEditorMenu.ControlFloatValue(ItemSuspensionBiasFront, conf.HandlingData._fSuspensionBiasFront, 0.01f, 1f, 6);
-                                        conf.HandlingData.AntiRollBarForce = VehicleEditorMenu.ControlFloatValue(ItemAntiRollBarForce, conf.HandlingData._fAntiRollBarForce, 0.01f, 1f, 6);
-                                        conf.HandlingData.AntiRollBarBiasFront = VehicleEditorMenu.ControlFloatValue(ItemAntiRollBarBiasFront, conf.HandlingData._fAntiRollBarBiasFront, 0.01f, 1f, 6);
-                                        conf.HandlingData.RollCentreHeightFront = VehicleEditorMenu.ControlFloatValue(ItemRollCentreHeightFront, conf.HandlingData._fRollCentreHeightFront, 0.01f, 1f, 6);
-                                        conf.HandlingData.RollCentreHeightRear = VehicleEditorMenu.ControlFloatValue(ItemRollCentreHeightRear, conf.HandlingData._fRollCentreHeightRear, 0.01f, 1f, 6);
+                                        conf.HandlingData.Mass = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemMass, conf.HandlingData._fMass, 5f, 10f, 0);
+                                        conf.HandlingData.InitialDragCoeff = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInitialDragCoeff, conf.HandlingData._fInitialDragCoeff, 5f, 10f, 0);
+                                        conf.HandlingData.CentreOfMassX = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemCentreOfMassX, conf.HandlingData._vecCentreOfMassX, 0.01f, 1f, 6);
+                                        conf.HandlingData.CentreOfMassY = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemCentreOfMassY, conf.HandlingData._vecCentreOfMassY, 0.01f, 1f, 6);
+                                        conf.HandlingData.CentreOfMassZ = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemCentreOfMassZ, conf.HandlingData._vecCentreOfMassZ, 0.01f, 1f, 6);
+                                        conf.HandlingData.InertiaMultiplierX = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInertiaMultiplierX, conf.HandlingData._vecInertiaMultiplierX, 0.01f, 1f, 6);
+                                        conf.HandlingData.InertiaMultiplierY = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInertiaMultiplierY, conf.HandlingData._vecInertiaMultiplierY, 0.01f, 1f, 6);
+                                        conf.HandlingData.InertiaMultiplierZ = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInertiaMultiplierZ, conf.HandlingData._vecInertiaMultiplierZ, 0.01f, 1f, 6);
+                                        conf.HandlingData.PercentSubmerged = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemPercentSubmerged, conf.HandlingData._fPercentSubmerged, 0.05f, 0.1f, 0, true, 0f, 1f);
+                                        conf.HandlingData.DriveBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemDriveBiasFront, conf.HandlingData._fDriveBiasFront, 0.01f, 1f, 6);
+                                        conf.HandlingData.nInitialDriveGears = (sbyte)VehicleEditorMenu.ControlIntValue_NoEvent(ItemnInitialDriveGears, conf.HandlingData._nInitialGears, 1, 2);
+                                        conf.HandlingData.DriveInertia = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemDriveInertia, conf.HandlingData._fDriveInertia, 0.01f, 1f, 6);
+                                        conf.HandlingData.ClutchChangeRateScaleUpShift = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemClutchChangeRateScaleUpShift, conf.HandlingData._fClutchChangeRateScaleUpShift, 0.01f, 1f, 6);
+                                        conf.HandlingData.ClutchChangeRateScaleDownShift = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemClutchChangeRateScaleDownShift, conf.HandlingData._fClutchChangeRateScaleDownShift, 0.01f, 1f, 6);
+                                        conf.HandlingData.InitialDriveForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInitialDriveForce, conf.HandlingData._fInitialDriveForce, 0.001f, 1f, 6);
+                                        conf.HandlingData.InitialDriveMaxFlatVel = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInitialDriveMaxFlatVel, conf.HandlingData._fInitialDriveMaxFlatVel, 0.01f, 1f, 6);
+                                        conf.HandlingData.BrakeForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemBrakeForce, conf.HandlingData._fBrakeForce, 0.01f, 1f, 6);
+                                        conf.HandlingData.BrakeBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemBrakeBiasFront, conf.HandlingData._fBrakeBiasFront, 0.01f, 1f, 6);
+                                        conf.HandlingData.HandBrakeForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemHandBrakeForce, conf.HandlingData._fHandBrakeForce, 0.01f, 1f, 6);
+                                        conf.HandlingData.SteeringLock = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSteeringLock, conf.HandlingData._fSteeringLock, 0.1f, 1f, 6);
+                                        conf.HandlingData.TractionCurveMax = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveMax, conf.HandlingData._fTractionCurveMax, 0.01f, 1f, 6);
+                                        conf.HandlingData.TractionCurveMin = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveMin, conf.HandlingData._fTractionCurveMin, 0.01f, 1f, 6);
+                                        conf.HandlingData.TractionCurveLateral = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveLateral, conf.HandlingData._fTractionCurveLateral, 0.01f, 1f, 6);
+                                        conf.HandlingData.TractionSpringDeltaMax = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionSpringDeltaMax, conf.HandlingData._fTractionSprintDeltaMax, 0.01f, 1f, 6);
+                                        conf.HandlingData.LowSpeedTractionLossMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemLowSpeedTractionLossMult, conf.HandlingData._fLowSpeedTractionLossMult, 0.01f, 1f, 6);
+                                        conf.HandlingData.CamberStiffness = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemCamberStiffness, conf.HandlingData._fCamberStiffness, 0.01f, 1f, 6);
+                                        conf.HandlingData.TractionBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionBiasFront, conf.HandlingData._fTractionBiasFront, 0.001f, 0.01f, 6);
+                                        conf.HandlingData.TractionLossMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionLossMult, conf.HandlingData._fTractionLossMult, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionForce, conf.HandlingData._fSuspensionForce, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionCompDamp = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionCompDamp, conf.HandlingData._fSuspensionCompDamp, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionReboundDamp = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionReboundDamp, conf.HandlingData._fSuspensionReboundDamp, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionUpperLimit = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionUpperLimit, conf.HandlingData._fSuspensionUpperLimit, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionLowerLimit = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionLowerLimit, conf.HandlingData._fSuspensionLowerLimit, 0.01f, 1f, 6);
+                                        conf.HandlingData.SuspensionBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionBiasFront, conf.HandlingData._fSuspensionBiasFront, 0.01f, 1f, 6);
+                                        conf.HandlingData.AntiRollBarForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemAntiRollBarForce, conf.HandlingData._fAntiRollBarForce, 0.01f, 1f, 6);
+                                        conf.HandlingData.AntiRollBarBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemAntiRollBarBiasFront, conf.HandlingData._fAntiRollBarBiasFront, 0.01f, 1f, 6);
+                                        conf.HandlingData.RollCentreHeightFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemRollCentreHeightFront, conf.HandlingData._fRollCentreHeightFront, 0.01f, 1f, 6);
+                                        conf.HandlingData.RollCentreHeightRear = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemRollCentreHeightRear, conf.HandlingData._fRollCentreHeightRear, 0.01f, 1f, 6);
+                                        conf.HandlingData.CollisionDamageMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemCollisionDamageMult, conf.HandlingData._fCollisionDamageMult, 0.01f, 1f, 2, true, 0f, float.MaxValue);
+                                        conf.HandlingData.WeaponDamageMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemWeaponDamageMult, conf.HandlingData._fWeaponDamageMult, 0.01f, 1f, 2, true, 0f, float.MaxValue);
+                                        conf.HandlingData.DeformationDamageMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemDeformationDamageMult, conf.HandlingData._fDeformationDamageMult, 0.01f, 1f, 2, true, 0f, float.MaxValue);
+                                        conf.HandlingData.EngineDamageMult = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemEngineDamageMult, conf.HandlingData._fEngineDamageMult, 0.01f, 1f, 2, true, 0f, float.MaxValue);
 
                                         if (VehicleEditorMenu.JustPressedAccept())
                                         {
                                             if (VehicleEditorMenu.SelectedItem == ItemDeleteConfig)
                                             {
                                                 DeleteConfig(conf);
+                                                VehicleEditorMenu.SetInputWait();
                                             }
                                             if (VehicleEditorMenu.SelectedItem == ItemSaveConfigNew)
                                             {
@@ -990,23 +1068,34 @@ namespace DrivingModes
                                                 if (confName == null || confName == "") { return; }
                                                 CreateNewConfig(confName + ".cfg");
                                                 DriveModeChange(Game.Player.Character.CurrentVehicle);
+                                                VehicleEditorMenu.SetInputWait();
                                             }
                                             if (VehicleEditorMenu.SelectedItem == ItemSaveConfig)
                                             {
                                                 SaveCurrentHandlingToConfig(conf);
                                                 DriveModeChange(Game.Player.Character.CurrentVehicle);
+                                                VehicleEditorMenu.SetInputWait();
                                             }
                                             if (VehicleEditorMenu.SelectedItem == ItemReloadConfig)
                                             {
                                                 LoadHandlingConfig(conf);
                                                 DriveModeChange(Game.Player.Character.CurrentVehicle);
+                                                VehicleEditorMenu.SetInputWait();
                                             }
-                                            VehicleEditorMenu.SetInputWait();
                                         }
                                     }
                                     if (LastUsedVehicleHash != ((VehicleHash)Game.Player.Character.CurrentVehicle.Model.Hash).ToString())
                                     {
                                         return;
+                                    }
+                                }
+
+                                if (VehicleEditorMenu.IsVisible && VehicleEditorMenu.SelectedItem != ItemConfigSelect)
+                                {
+                                    if (Game.IsControlJustReleased(2, Control.PhoneLeft) || Game.IsControlJustReleased(2, Control.PhoneRight))
+                                    {
+                                        //DriveModeChange(Game.Player.Character.CurrentVehicle);
+                                        forceRespawnVeh(Game.Player.Character.CurrentVehicle);
                                     }
                                 }
 
@@ -1065,41 +1154,41 @@ namespace DrivingModes
                         {
                             FirstPersonSettings.PositionOffset = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetX, FirstPersonSettings.PositionOffset.X, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetY, FirstPersonSettings.PositionOffset.Y, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetZ, FirstPersonSettings.PositionOffset.Z, 0.01f, 0.1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetX, FirstPersonSettings.PositionOffset.X, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetY, FirstPersonSettings.PositionOffset.Y, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetZ, FirstPersonSettings.PositionOffset.Z, 0.01f, 0.1f)
                                 );
 
                             FirstPersonSettings.Rotation = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationX, FirstPersonSettings.Rotation.X, 0.5f, 1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationY, FirstPersonSettings.Rotation.Y, 0.5f, 1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationZ, FirstPersonSettings.Rotation.Z, 0.5f, 1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationX, FirstPersonSettings.Rotation.X, 0.5f, 1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationY, FirstPersonSettings.Rotation.Y, 0.5f, 1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationZ, FirstPersonSettings.Rotation.Z, 0.5f, 1f)
                                 );
 
                             ItemPointPositionX.Value = "Third-Person mode ONLY";
                             ItemPointPositionY.Value = "Third-Person mode ONLY";
                             ItemPointPositionZ.Value = "Third-Person mode ONLY";
 
-                            LeftRightAdditionalCameraOffset = CameraSettingsMenu.ControlFloatValue(ItemLeftRightAdditionalCameraOffset, LeftRightAdditionalCameraOffset, 0.01f, 0.05f);
-                            FirstPersonSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue(ItemFieldOfView, FirstPersonSettings.FieldOfView, 1f, 5f);
-                            FirstPersonSettings.AutoCenterCamera = CameraSettingsMenu.ControlBoolValue(ItemAutoCenter, FirstPersonSettings.AutoCenterCamera);
-                            FirstPersonSettings.Enabled = CameraSettingsMenu.ControlBoolValue(ItemCameraEnabled, FirstPersonSettings.Enabled);
+                            LeftRightAdditionalCameraOffset = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemLeftRightAdditionalCameraOffset, LeftRightAdditionalCameraOffset, 0.01f, 0.05f);
+                            FirstPersonSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemFieldOfView, FirstPersonSettings.FieldOfView, 1f, 5f);
+                            FirstPersonSettings.AutoCenterCamera = CameraSettingsMenu.ControlBoolValue_NoEvent(ItemAutoCenter, FirstPersonSettings.AutoCenterCamera);
+                            FirstPersonSettings.Enabled = CameraSettingsMenu.ControlBoolValue_NoEvent(ItemCameraEnabled, FirstPersonSettings.Enabled);
                         }
                         else if (CamCurrentMode == (int)CameraTypes.FixedCam)
                         {
                             FixedCameraSettings.PositionOffset = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetX, FixedCameraSettings.PositionOffset.X, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetY, FixedCameraSettings.PositionOffset.Y, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetZ, FixedCameraSettings.PositionOffset.Z, 0.01f, 0.1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetX, FixedCameraSettings.PositionOffset.X, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetY, FixedCameraSettings.PositionOffset.Y, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetZ, FixedCameraSettings.PositionOffset.Z, 0.01f, 0.1f)
                                 );
 
                             FixedCameraSettings.Rotation = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationX, FixedCameraSettings.Rotation.X, 0.5f, 1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationY, FixedCameraSettings.Rotation.Y, 0.5f, 1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemRotationZ, FixedCameraSettings.Rotation.Z, 0.5f, 1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationX, FixedCameraSettings.Rotation.X, 0.5f, 1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationY, FixedCameraSettings.Rotation.Y, 0.5f, 1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemRotationZ, FixedCameraSettings.Rotation.Z, 0.5f, 1f)
                                 );
 
                             ItemPointPositionX.Value = "Third-Person mode ONLY";
@@ -1107,17 +1196,17 @@ namespace DrivingModes
                             ItemPointPositionZ.Value = "Third-Person mode ONLY";
 
                             ItemLeftRightAdditionalCameraOffset.Value = "First-Person mode ONLY";
-                            FixedCameraSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue(ItemFieldOfView, FixedCameraSettings.FieldOfView, 1f, 5f);
-                            FixedCameraSettings.AutoCenterCamera = CameraSettingsMenu.ControlBoolValue(ItemAutoCenter, FixedCameraSettings.AutoCenterCamera);
-                            FixedCameraSettings.Enabled = CameraSettingsMenu.ControlBoolValue(ItemCameraEnabled, FixedCameraSettings.Enabled);
+                            FixedCameraSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemFieldOfView, FixedCameraSettings.FieldOfView, 1f, 5f);
+                            FixedCameraSettings.AutoCenterCamera = CameraSettingsMenu.ControlBoolValue_NoEvent(ItemAutoCenter, FixedCameraSettings.AutoCenterCamera);
+                            FixedCameraSettings.Enabled = CameraSettingsMenu.ControlBoolValue_NoEvent(ItemCameraEnabled, FixedCameraSettings.Enabled);
                         }
                         else if (CamCurrentMode == (int)CameraTypes.ThirdPersonCam)
                         {
                             ThirdPersonSettings.PositionOffset = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetX, ThirdPersonSettings.PositionOffset.X, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetY, ThirdPersonSettings.PositionOffset.Y, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPositionOffsetZ, ThirdPersonSettings.PositionOffset.Z, 0.01f, 0.1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetX, ThirdPersonSettings.PositionOffset.X, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetY, ThirdPersonSettings.PositionOffset.Y, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPositionOffsetZ, ThirdPersonSettings.PositionOffset.Z, 0.01f, 0.1f)
                                 );
 
                             ItemRotationX.Value = "Not Supported";
@@ -1126,20 +1215,20 @@ namespace DrivingModes
 
                             ThirdPersonSettings.PointPositionOffset = new Vector3
                                 (
-                                CameraSettingsMenu.ControlFloatValue(ItemPointPositionX, ThirdPersonSettings.PointPositionOffset.X, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPointPositionY, ThirdPersonSettings.PointPositionOffset.Y, 0.01f, 0.1f),
-                                CameraSettingsMenu.ControlFloatValue(ItemPointPositionZ, ThirdPersonSettings.PointPositionOffset.Z, 0.01f, 0.1f)
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPointPositionX, ThirdPersonSettings.PointPositionOffset.X, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPointPositionY, ThirdPersonSettings.PointPositionOffset.Y, 0.01f, 0.1f),
+                                CameraSettingsMenu.ControlFloatValue_NoEvent(ItemPointPositionZ, ThirdPersonSettings.PointPositionOffset.Z, 0.01f, 0.1f)
                                 );
 
                             ItemLeftRightAdditionalCameraOffset.Value = "First-Person mode ONLY";
-                            ThirdPersonSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue(ItemFieldOfView, ThirdPersonSettings.FieldOfView, 1f, 5f);
+                            ThirdPersonSettings.FieldOfView = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemFieldOfView, ThirdPersonSettings.FieldOfView, 1f, 5f);
                             ItemAutoCenter.Value = "Not Supported";
-                            ThirdPersonSettings.Enabled = CameraSettingsMenu.ControlBoolValue(ItemCameraEnabled, ThirdPersonSettings.Enabled);
+                            ThirdPersonSettings.Enabled = CameraSettingsMenu.ControlBoolValue_NoEvent(ItemCameraEnabled, ThirdPersonSettings.Enabled);
                         }
 
-                        MouseSensitivity = CameraSettingsMenu.ControlFloatValue(ItemMouseSensitivity, MouseSensitivity, 10f, 50f, 0);
-                        GamepadLookSensitivity = CameraSettingsMenu.ControlFloatValue(ItemGamepadLookSensitivity, GamepadLookSensitivity, 10f, 50f, 0);
-                        GamepadAimSensitivity = CameraSettingsMenu.ControlFloatValue(ItemGamepadAimSensitivity, GamepadAimSensitivity, 10f, 50f, 0);
+                        MouseSensitivity = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemMouseSensitivity, MouseSensitivity, 10f, 50f, 0);
+                        GamepadLookSensitivity = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemGamepadLookSensitivity, GamepadLookSensitivity, 10f, 50f, 0);
+                        GamepadAimSensitivity = CameraSettingsMenu.ControlFloatValue_NoEvent(ItemGamepadAimSensitivity, GamepadAimSensitivity, 10f, 50f, 0);
 
                         if (CameraSettingsMenu.SelectedItem == ItemCameraSwitch)
                         {
@@ -1252,12 +1341,15 @@ namespace DrivingModes
 
         void ApplyAllInConfig(Configs conf)
         {
+            HandlingUtils.SetMass(conf.HandlingData._fMass);
+            HandlingUtils.SetInitialDragCoeff(conf.HandlingData._fInitialDragCoeff);
             HandlingUtils.SetCentreOfMassX(conf.HandlingData._vecCentreOfMassX);
             HandlingUtils.SetCentreOfMassY(conf.HandlingData._vecCentreOfMassY);
             HandlingUtils.SetCentreOfMassZ(conf.HandlingData._vecCentreOfMassZ);
             HandlingUtils.SetInertiaMultiplierX(conf.HandlingData._vecInertiaMultiplierX);
             HandlingUtils.SetInertiaMultiplierY(conf.HandlingData._vecInertiaMultiplierY);
             HandlingUtils.SetInertiaMultiplierZ(conf.HandlingData._vecInertiaMultiplierZ);
+            HandlingUtils.SetPercentSubmerged(conf.HandlingData._fPercentSubmerged);
             HandlingUtils.SetDriveBiasFront(conf.HandlingData._fDriveBiasFront);
             HandlingUtils.SetnInitialDriveGears(conf.HandlingData._nInitialGears);
             HandlingUtils.SetDriveInertia(conf.HandlingData._fDriveInertia);
@@ -1287,6 +1379,10 @@ namespace DrivingModes
             HandlingUtils.SetAntiRollBarBiasFront(conf.HandlingData._fAntiRollBarBiasFront);
             HandlingUtils.SetRollCentreHeightFront(conf.HandlingData._fRollCentreHeightFront);
             HandlingUtils.SetRollCentreHeightRear(conf.HandlingData._fRollCentreHeightRear);
+            HandlingUtils.SetCollisionDamageMult(conf.HandlingData._fCollisionDamageMult);
+            HandlingUtils.SetWeaponDamageMult(conf.HandlingData._fWeaponDamageMult);
+            HandlingUtils.SetDeformationDamageMult(conf.HandlingData._fDeformationDamageMult);
+            HandlingUtils.SetEngineDamageMult(conf.HandlingData._fEngineDamageMult);
         }
 
         enum CameraTypes
@@ -1451,14 +1547,7 @@ namespace DrivingModes
             
             if (!CameraSettingsMenu.IsVisible)
             {
-                if (isVehicleSpecial(Game.Player.Character.CurrentVehicle))
-                {
-                    LoadCameraSettings(@"scripts\DrivingModes\Configs\" + LastUsedVehicleName + "\\CameraSettings.ini");
-                }
-                else
-                {
-                    LoadCameraSettings(@"scripts\DrivingModes\GlobalCameraSettings.ini");
-                }
+                LoadAppropriateCameraSettings();
             }
 
             LeftRightSum = 0f;
@@ -1467,18 +1556,40 @@ namespace DrivingModes
             SetupInputWait();
         }
 
+        void LoadAppropriateCameraSettings()
+        {
+            if (isVehicleSpecial(Game.Player.Character.CurrentVehicle))
+            {
+                LoadCameraSettings(@"scripts\DrivingModes\Configs\" + LastUsedVehicleName + "\\CameraSettings.ini");
+            }
+            else
+            {
+                LoadCameraSettings(@"scripts\DrivingModes\GlobalCameraSettings.ini");
+            }
+        }
+
         void SetupCameraOnce()
         {
-            if (CustomVehicleCam != null)
+            if (Game.Player.CanControlCharacter)
             {
-                if (!CustomVehicleCam.Exists())
+                if (CustomVehicleCam != null)
+                {
+                    if (!CustomVehicleCam.Exists())
+                    {
+                        CustomVehicleCam = World.CreateCamera(GameplayCamera.Position, GameplayCamera.Rotation, GameplayCamera.FieldOfView);
+                    }
+                }
+                else
                 {
                     CustomVehicleCam = World.CreateCamera(GameplayCamera.Position, GameplayCamera.Rotation, GameplayCamera.FieldOfView);
                 }
             }
             else
             {
-                CustomVehicleCam = World.CreateCamera(GameplayCamera.Position, GameplayCamera.Rotation, GameplayCamera.FieldOfView);
+                if (CustomVehicleCam != null && CustomVehicleCam.Exists())
+                {
+                    CustomVehicleCam = null;
+                }
             }
         }
 
@@ -2066,6 +2177,8 @@ namespace DrivingModes
             newVeh.Health = lastHealth;
             newVeh.DirtLevel = dirtLevel;
             //newVeh.FuelLevel = fuelLevel; //Requires SHVDN update due to memory offset changes.
+
+            newVeh.IsPersistent = false;
         }
 
         bool ExtraExist(Vehicle v, int i)
@@ -2129,29 +2242,29 @@ namespace DrivingModes
                 {
                     var conf = LastUsedSpecialVehicle.Configs.ElementAt(i);
 
-                    conf.HandlingData.DriveBiasFront = VehicleEditorMenu.ControlFloatValue(ItemDriveBiasFront, conf.HandlingData._fDriveBiasFront, 0.01f, 1f, 6);
-                    conf.HandlingData.DriveInertia = VehicleEditorMenu.ControlFloatValue(ItemDriveInertia, conf.HandlingData._fDriveInertia, 0.01f, 1f, 6);
-                    conf.HandlingData.ClutchChangeRateScaleUpShift = VehicleEditorMenu.ControlFloatValue(ItemClutchChangeRateScaleUpShift, conf.HandlingData._fClutchChangeRateScaleUpShift, 0.01f, 1f, 6);
-                    conf.HandlingData.ClutchChangeRateScaleDownShift = VehicleEditorMenu.ControlFloatValue(ItemClutchChangeRateScaleDownShift, conf.HandlingData._fClutchChangeRateScaleDownShift, 0.01f, 1f, 6);
-                    conf.HandlingData.InitialDriveForce = VehicleEditorMenu.ControlFloatValue(ItemInitialDriveForce, conf.HandlingData._fInitialDriveForce, 0.01f, 1f, 6);
-                    conf.HandlingData.InitialDriveMaxFlatVel = VehicleEditorMenu.ControlFloatValue(ItemInitialDriveMaxFlatVel, conf.HandlingData._fInitialDriveMaxFlatVel, 0.01f, 1f, 6);
-                    conf.HandlingData.BrakeForce = VehicleEditorMenu.ControlFloatValue(ItemBrakeForce, conf.HandlingData._fBrakeForce, 0.01f, 1f, 6);
-                    conf.HandlingData.BrakeBiasFront = VehicleEditorMenu.ControlFloatValue(ItemBrakeBiasFront, conf.HandlingData._fBrakeBiasFront, 0.01f, 1f, 6);
-                    conf.HandlingData.HandBrakeForce = VehicleEditorMenu.ControlFloatValue(ItemHandBrakeForce, conf.HandlingData._fHandBrakeForce, 0.01f, 1f, 6);
-                    conf.HandlingData.SteeringLock = VehicleEditorMenu.ControlFloatValue(ItemSteeringLock, conf.HandlingData._fSteeringLock, 0.01f, 1f, 6);
-                    conf.HandlingData.TractionCurveMax = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveMax, conf.HandlingData._fTractionCurveMax, 0.01f, 1f, 6);
-                    conf.HandlingData.TractionCurveMin = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveMin, conf.HandlingData._fTractionCurveMin, 0.01f, 1f, 6);
-                    conf.HandlingData.TractionCurveLateral = VehicleEditorMenu.ControlFloatValue(ItemTractionCurveLateral, conf.HandlingData._fTractionCurveLateral, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionForce = VehicleEditorMenu.ControlFloatValue(ItemSuspensionForce, conf.HandlingData._fSuspensionForce, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionCompDamp = VehicleEditorMenu.ControlFloatValue(ItemSuspensionCompDamp, conf.HandlingData._fSuspensionCompDamp, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionReboundDamp = VehicleEditorMenu.ControlFloatValue(ItemSuspensionReboundDamp, conf.HandlingData._fSuspensionReboundDamp, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionUpperLimit = VehicleEditorMenu.ControlFloatValue(ItemSuspensionUpperLimit, conf.HandlingData._fSuspensionUpperLimit, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionLowerLimit = VehicleEditorMenu.ControlFloatValue(ItemSuspensionLowerLimit, conf.HandlingData._fSuspensionLowerLimit, 0.01f, 1f, 6);
-                    conf.HandlingData.SuspensionBiasFront = VehicleEditorMenu.ControlFloatValue(ItemSuspensionBiasFront, conf.HandlingData._fSuspensionBiasFront, 0.01f, 1f, 6);
-                    conf.HandlingData.AntiRollBarForce = VehicleEditorMenu.ControlFloatValue(ItemAntiRollBarForce, conf.HandlingData._fAntiRollBarForce, 0.01f, 1f, 6);
-                    conf.HandlingData.AntiRollBarBiasFront = VehicleEditorMenu.ControlFloatValue(ItemAntiRollBarBiasFront, conf.HandlingData._fAntiRollBarBiasFront, 0.01f, 1f, 6);
-                    conf.HandlingData.RollCentreHeightFront = VehicleEditorMenu.ControlFloatValue(ItemRollCentreHeightFront, conf.HandlingData._fRollCentreHeightFront, 0.01f, 1f, 6);
-                    conf.HandlingData.RollCentreHeightRear = VehicleEditorMenu.ControlFloatValue(ItemRollCentreHeightRear, conf.HandlingData._fRollCentreHeightRear, 0.01f, 1f, 6);
+                    conf.HandlingData.DriveBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemDriveBiasFront, conf.HandlingData._fDriveBiasFront, 0.01f, 1f, 6);
+                    conf.HandlingData.DriveInertia = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemDriveInertia, conf.HandlingData._fDriveInertia, 0.01f, 1f, 6);
+                    conf.HandlingData.ClutchChangeRateScaleUpShift = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemClutchChangeRateScaleUpShift, conf.HandlingData._fClutchChangeRateScaleUpShift, 0.01f, 1f, 6);
+                    conf.HandlingData.ClutchChangeRateScaleDownShift = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemClutchChangeRateScaleDownShift, conf.HandlingData._fClutchChangeRateScaleDownShift, 0.01f, 1f, 6);
+                    conf.HandlingData.InitialDriveForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInitialDriveForce, conf.HandlingData._fInitialDriveForce, 0.01f, 1f, 6);
+                    conf.HandlingData.InitialDriveMaxFlatVel = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemInitialDriveMaxFlatVel, conf.HandlingData._fInitialDriveMaxFlatVel, 0.01f, 1f, 6);
+                    conf.HandlingData.BrakeForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemBrakeForce, conf.HandlingData._fBrakeForce, 0.01f, 1f, 6);
+                    conf.HandlingData.BrakeBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemBrakeBiasFront, conf.HandlingData._fBrakeBiasFront, 0.01f, 1f, 6);
+                    conf.HandlingData.HandBrakeForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemHandBrakeForce, conf.HandlingData._fHandBrakeForce, 0.01f, 1f, 6);
+                    conf.HandlingData.SteeringLock = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSteeringLock, conf.HandlingData._fSteeringLock, 0.01f, 1f, 6);
+                    conf.HandlingData.TractionCurveMax = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveMax, conf.HandlingData._fTractionCurveMax, 0.01f, 1f, 6);
+                    conf.HandlingData.TractionCurveMin = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveMin, conf.HandlingData._fTractionCurveMin, 0.01f, 1f, 6);
+                    conf.HandlingData.TractionCurveLateral = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemTractionCurveLateral, conf.HandlingData._fTractionCurveLateral, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionForce, conf.HandlingData._fSuspensionForce, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionCompDamp = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionCompDamp, conf.HandlingData._fSuspensionCompDamp, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionReboundDamp = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionReboundDamp, conf.HandlingData._fSuspensionReboundDamp, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionUpperLimit = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionUpperLimit, conf.HandlingData._fSuspensionUpperLimit, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionLowerLimit = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionLowerLimit, conf.HandlingData._fSuspensionLowerLimit, 0.01f, 1f, 6);
+                    conf.HandlingData.SuspensionBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemSuspensionBiasFront, conf.HandlingData._fSuspensionBiasFront, 0.01f, 1f, 6);
+                    conf.HandlingData.AntiRollBarForce = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemAntiRollBarForce, conf.HandlingData._fAntiRollBarForce, 0.01f, 1f, 6);
+                    conf.HandlingData.AntiRollBarBiasFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemAntiRollBarBiasFront, conf.HandlingData._fAntiRollBarBiasFront, 0.01f, 1f, 6);
+                    conf.HandlingData.RollCentreHeightFront = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemRollCentreHeightFront, conf.HandlingData._fRollCentreHeightFront, 0.01f, 1f, 6);
+                    conf.HandlingData.RollCentreHeightRear = VehicleEditorMenu.ControlFloatValue_NoEvent(ItemRollCentreHeightRear, conf.HandlingData._fRollCentreHeightRear, 0.01f, 1f, 6);
 
                     if (VehicleEditorMenu.JustPressedAccept())
                     {
@@ -2272,12 +2385,15 @@ namespace DrivingModes
 
     public class CurrentHandling
     {
+        public float _fMass;
+        public float _fInitialDragCoeff;
         public float _vecCentreOfMassX;
         public float _vecCentreOfMassY;
         public float _vecCentreOfMassZ;
         public float _vecInertiaMultiplierX;
         public float _vecInertiaMultiplierY;
         public float _vecInertiaMultiplierZ;
+        public float _fPercentSubmerged;
         public float _fDriveBiasFront;
         public sbyte _nInitialGears;
         public float _fDriveInertia;
@@ -2307,12 +2423,42 @@ namespace DrivingModes
         public float _fAntiRollBarBiasFront;
         public float _fRollCentreHeightFront;
         public float _fRollCentreHeightRear;
+        public float _fCollisionDamageMult;
+        public float _fWeaponDamageMult;
+        public float _fDeformationDamageMult;
+        public float _fEngineDamageMult;
         public float _TorqueMult;
         public float _EngPowMult;
         public int _SpeedLimit;
         
         public CurrentHandling()
         {
+        }
+
+        public float Mass
+        {
+            get { return _fMass; }
+            set
+            {
+                if (_fMass != value)
+                {
+                    HandlingUtils.SetMass(value);
+                }
+                _fMass = value;
+            }
+        }
+
+        public float InitialDragCoeff
+        {
+            get { return _fInitialDragCoeff; }
+            set
+            {
+                if (_fInitialDragCoeff != value)
+                {
+                    HandlingUtils.SetInitialDragCoeff(value);
+                }
+                _fInitialDragCoeff = value;
+            }
         }
 
         public float CentreOfMassX
@@ -2378,6 +2524,19 @@ namespace DrivingModes
                 if (_vecInertiaMultiplierZ != value)
                 { HandlingUtils.SetInertiaMultiplierZ(value); }
                 _vecInertiaMultiplierZ = value;
+            }
+        }
+
+        public float PercentSubmerged
+        {
+            get { return _fPercentSubmerged; }
+            set
+            {
+                if (_fPercentSubmerged != value)
+                {
+                    HandlingUtils.SetPercentSubmerged(value);
+                }
+                _fPercentSubmerged = value;
             }
         }
 
@@ -2678,6 +2837,50 @@ namespace DrivingModes
                 _fRollCentreHeightRear = value;  }
         }
 
+        public float CollisionDamageMult
+        {
+            get { return _fCollisionDamageMult; }
+            set
+            {
+                if (_fCollisionDamageMult != value)
+                { HandlingUtils.SetCollisionDamageMult(value); }
+                _fCollisionDamageMult = value;
+            }
+        }
+
+        public float WeaponDamageMult
+        {
+            get { return _fWeaponDamageMult; }
+            set
+            {
+                if (_fWeaponDamageMult != value)
+                { HandlingUtils.SetWeaponDamageMult(value); }
+                _fWeaponDamageMult = value;
+            }
+        }
+
+        public float DeformationDamageMult
+        {
+            get { return _fDeformationDamageMult; }
+            set
+            {
+                if (_fDeformationDamageMult != value)
+                { HandlingUtils.SetDeformationDamageMult(value); }
+                _fDeformationDamageMult = value;
+            }
+        }
+
+        public float EngineDamageMult
+        {
+            get { return _fEngineDamageMult; }
+            set
+            {
+                if (_fEngineDamageMult != value)
+                { HandlingUtils.SetEngineDamageMult(value); }
+                _fEngineDamageMult = value;
+            }
+        }
+
         public int SpeedLimit
         {
             get { return _SpeedLimit; }
@@ -2687,12 +2890,16 @@ namespace DrivingModes
 
     public static class HandlingUtils
     {
+        static int fMass = 0x000C;
+        static int fInitialDragCoeff = 0x0010;
         static int vecCentreOfMassX = 0x0020;
         static int vecCentreOfMassY = 0x0024;
         static int vecCentreOfMassZ = 0x0028;
         static int vecInertiaMultiplierX = 0x0030;
         static int vecInertiaMultiplierY = 0x0034;
         static int vecInertiaMultiplierZ = 0x0038;
+        static int fPercentSubmerged = 0x0040;
+        static int fSubmergedRatio = 0x0044;
         static int fDriveBiasFront = 0x0048;
         static int fDriveBiasRear = 0x004C;
         static byte nInitialDriveGears = 0x0050;
@@ -2733,8 +2940,22 @@ namespace DrivingModes
         static int fAntiRollBarBiasRear = 0x00E4;
         static int fRollCentreHeightFront = 0x00E8;
         static int fRollCentreHeightRear = 0x00EC;
+        static int fCollisionDamageMult = 0x00F0;
+        static int fWeaponDamageMult = 0x00F4;
+        static int fDeformationDamageMult = 0x00F8;
+        static int fEngineDamageMult = 0x00FC;
 
         /*Set Values*/
+
+        public static void SetMass(float value)
+        {
+            SetHandlingValue(fMass, value);
+        }
+
+        public static void SetInitialDragCoeff(float value)
+        {
+            SetHandlingValue(fInitialDragCoeff, value / 10000.0f);
+        }
 
         public static void SetCentreOfMassX(float value)
         {
@@ -2764,6 +2985,12 @@ namespace DrivingModes
         public static void SetInertiaMultiplierZ(float value)
         {
             SetHandlingValue(vecInertiaMultiplierZ, value);
+        }
+
+        public static void SetPercentSubmerged(float value)
+        {
+            SetHandlingValue(fPercentSubmerged, value);
+            SetHandlingValue(fSubmergedRatio, 100.0f / value);
         }
 
         public static void SetDriveBiasFront(float value)
@@ -2951,9 +3178,39 @@ namespace DrivingModes
             SetHandlingValue(fRollCentreHeightRear, value);
         }
 
+        public static void SetCollisionDamageMult(float value)
+        {
+            SetHandlingValue(fCollisionDamageMult, value);
+        }
+
+        public static void SetWeaponDamageMult(float value)
+        {
+            SetHandlingValue(fWeaponDamageMult, value);
+        }
+
+        public static void SetDeformationDamageMult(float value)
+        {
+            SetHandlingValue(fDeformationDamageMult, value);
+        }
+
+        public static void SetEngineDamageMult(float value)
+        {
+            SetHandlingValue(fEngineDamageMult, value);
+        }
+
         /*End Set Values*/
 
         /*Start Get Values*/
+
+        public static float GetMass()
+        {
+            return GetHandlingValue(fMass);
+        }
+
+        public static float GetInitialDragCoeff()
+        {
+            return GetHandlingValue(fInitialDragCoeff) * 10000.0f;
+        }
 
         public static float GetCentreOfMassX()
         {
@@ -2983,6 +3240,11 @@ namespace DrivingModes
         public static float GetInertiaMultiplierZ()
         {
             return GetHandlingValue(vecInertiaMultiplierZ);
+        }
+
+        public static float GetPercentSubmerged()
+        {
+            return GetHandlingValue(fPercentSubmerged);
         }
 
         public static float GetDriveBiasFront()
@@ -3153,56 +3415,86 @@ namespace DrivingModes
             return GetHandlingValue(fRollCentreHeightRear);
         }
 
+        public static float GetCollisionDamageMult()
+        {
+            return GetHandlingValue(fCollisionDamageMult);
+        }
+
+        public static float GetWeaponDamageMult()
+        {
+            return GetHandlingValue(fWeaponDamageMult);
+        }
+
+        public static float GetDeformationDamageMult()
+        {
+            return GetHandlingValue(fDeformationDamageMult);
+        }
+
+        public static float GetEngineDamageMult()
+        {
+            return GetHandlingValue(fEngineDamageMult);
+        }
+
         /*End Get Values*/
 
         /*///////////////////////////////////////////////////*/
 
+        /// <summary>
+        /// The offset for vehicle handling.
+        /// </summary>
+        private static int _hOffset;
+
+        /// <summary>
+        /// Intitializes this class with the handling offset. 
+        /// MUST be called for any of these methods to work.
+        /// Credits: CamxxCore (https://github.com/CamxxCore), sollaholla (https://github.com/sollaholla), and Unknown_Modder (https://github.com/UnknownModder)
+        /// </summary>
+        public unsafe static void Init()
+        {
+            var pattern = new Pattern("\x3C\x03\x0F\x85\x00\x00\x00\x00\x48\x8B\x41\x20\x48\x8B\x88", "xxxx????xxxxxxx");
+            pattern.Init();
+            var ptr = pattern.Get().ToInt64();
+            _hOffset = *(int*)(ptr + 0x16);
+        }
+
+        /*public static int GetHandlingOffset()
+         {
+             int gameVersion = (int)Game.Version;
+             int handlingOffset;
+             handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
+             handlingOffset = (gameVersion >= 26 ? 0x850 : handlingOffset);
+             handlingOffset = (gameVersion >= 28 ? 0x878 : handlingOffset);
+             handlingOffset = (gameVersion >= 34 ? 0x888 : handlingOffset);
+             handlingOffset = (gameVersion >= 36 ? 0x8A8 : handlingOffset);
+
+             return handlingOffset;
+         }*/
+
         unsafe static float GetHandlingValue(int exactOffset)
         {
-            int gameVersion = (int)Game.Version;
-            int handlingOffset;
-            handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
-            handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
-            handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 34 ? 0x888 : handlingOffset);
-
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
-            ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
+            ulong handlingPtr = *(ulong*)(vehPtr + (uint)_hOffset); //add handling offset to address to get handling address
             float fValue = *(float*)(handlingPtr + (uint)exactOffset); //get float value of SuspRaise address
             return fValue;
         }
 
         unsafe static sbyte GetHandlingValueInt8(int exactOffset)
         {
-            int gameVersion = (int)Game.Version;
-            int handlingOffset;
-            handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
-            handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
-            handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 34 ? 0x888 : handlingOffset);
-
             ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
-            ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
+            ulong handlingPtr = *(ulong*)(vehPtr + (uint)_hOffset); //add handling offset to address to get handling address
             sbyte fValue = *(sbyte*)(handlingPtr + (uint)exactOffset); //get float value of SuspRaise address
             return fValue;
         }
 
         unsafe static void SetHandlingValue(int exactOffset, float currentValue)
         {
-            int gameVersion = (int)Game.Version;
-            int handlingOffset;
-            handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
-            handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
-            handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 34 ? 0x888 : handlingOffset);
-
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
             {
                 using (CheatEngine.Memory memory = new CheatEngine.Memory(processes[0]))
                 {
                     ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
-                    ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
+                    ulong handlingPtr = *(ulong*)(vehPtr + (uint)_hOffset); //add handling offset to address to get handling address
                     IntPtr exactPointer = (IntPtr)(handlingPtr + (uint)exactOffset); //convert exact handling address to IntPtr
 
                     memory.WriteFloat(exactPointer, currentValue); //write
@@ -3216,20 +3508,13 @@ namespace DrivingModes
 
         unsafe static void SetHandlingValueInt(int exactOffset, int currentValue)
         {
-            int gameVersion = (int)Game.Version;
-            int handlingOffset;
-            handlingOffset = (gameVersion > 3 ? 0x830 : 0x820);
-            handlingOffset = (gameVersion > 25 ? 0x850 : handlingOffset);
-            handlingOffset = (gameVersion > 27 ? 0x878 : handlingOffset);
-            handlingOffset = (gameVersion > 34 ? 0x888 : handlingOffset);
-
             Process[] processes = Process.GetProcessesByName("GTA5");
             if (processes.Length > 0)
             {
                 using (CheatEngine.Memory memory = new CheatEngine.Memory(processes[0]))
                 {
                     ulong vehPtr = (ulong)Game.Player.Character.CurrentVehicle.MemoryAddress; //convert veh.MemoryAddress to ulong
-                    ulong handlingPtr = *(ulong*)(vehPtr + (uint)handlingOffset); //add handling offset to address to get handling address
+                    ulong handlingPtr = *(ulong*)(vehPtr + (uint)_hOffset); //add handling offset to address to get handling address
                     IntPtr exactPointer = (IntPtr)(handlingPtr + (uint)exactOffset); //convert exact handling address to IntPtr
 
                     memory.WriteInt32(exactPointer, currentValue); //write

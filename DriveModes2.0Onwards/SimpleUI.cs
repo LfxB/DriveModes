@@ -17,13 +17,20 @@ namespace SimpleUI
         List<UIMenu> _menuList = new List<UIMenu>();
         public UIMenu LastUsedMenu { get; set; }
 
+        public List<UIMenu> UIMenuList
+        {
+            get { return _menuList; }
+            set { _menuList = value; }
+        }
+
         public void AddMenu(UIMenu menu)
         {
             _menuList.Add(menu);
+            if (_menuList.Count == 1) { LastUsedMenu = menu; }
         }
 
         /// <summary>
-        /// Adds a submenu to a parent menu and to the MenuPool.
+        /// Adds a submenu to a parent menu and to the MenuPool. Returns UIMenuItem that links the parent menu to the submenu.
         /// </summary>
         /// <param name="SubMenu">The submenu</param>
         /// <param name="ParentMenu">The parent menu.</param>
@@ -33,7 +40,7 @@ namespace SimpleUI
             AddMenu(SubMenu);
             /*SubMenu.ParentMenu = ParentMenu;
             ParentMenu.NextMenu = SubMenu;*/
-            var item = new UIMenuItem(text);
+            var item = new UIMenuItem(text + "  ~r~>"); //colour codes: gtaforums.com/topic/820813-displaying-help-text/?p=1067993556
             //ParentMenu.BindingMenuItem = BindingItem;
             ParentMenu.AddMenuItem(item);
             //ParentMenu.BindingMenuItem = item;
@@ -56,7 +63,7 @@ namespace SimpleUI
         }
 
         /// <summary>
-        /// Adds a submenu to a parent menu and to the MenuPool.
+        /// Adds a submenu to a parent menu and to the MenuPool. Returns UIMenuItem that links the parent menu to the submenu.
         /// </summary>
         /// <param name="SubMenu">The submenu</param>
         /// <param name="ParentMenu">The parent menu.</param>
@@ -67,7 +74,7 @@ namespace SimpleUI
             AddMenu(SubMenu);
             //SubMenu.ParentMenu = ParentMenu;
             //ParentMenu.NextMenu = SubMenu;
-            var item = new UIMenuItem(text, null, description);
+            var item = new UIMenuItem(text + "  ~r~>", null, description);
             //ParentMenu.BindingMenuItem = BindingItem;
             ParentMenu.AddMenuItem(item);
             //ParentMenu.BindingMenuItem = item;
@@ -145,9 +152,22 @@ namespace SimpleUI
         {
             _menuList.Clear();
         }
+
+        public void OpenCloseLastMenu()
+        {
+            if (this.IsAnyMenuOpen())
+            {
+                this.CloseAllMenus();
+            }
+            else
+            {
+                this.LastUsedMenu.IsVisible = !this.LastUsedMenu.IsVisible;
+            }
+        }
     }
 
     public delegate void ItemSelectEvent(UIMenu sender, UIMenuItem selectedItem, int index);
+    public delegate void ItemLeftRightEvent(UIMenu sender, UIMenuItem selectedItem, int index, bool left);
 
     public class UIMenu
     {
@@ -157,7 +177,7 @@ namespace SimpleUI
         public UIMenuItem BindingMenuItem { get; set; }
 
         public int SelectedIndex = 0;
-        public bool IsVisible;
+        public bool IsVisible = false;
         public string Title { get; set; }
         public UIMenuItem SelectedItem;
         protected List<UIMenuItem> _itemList = new List<UIMenuItem>();
@@ -167,14 +187,34 @@ namespace SimpleUI
         DateTime InputTimer;
         static int InputWait = 80;
 
+        public bool UseEventBasedControls = true;
+
+        /// <summary>
+        /// Called when user selects a simple item.
+        /// </summary>
+        public event ItemSelectEvent OnItemSelect;
+
+        /// <summary>
+        /// Called when user presses left or right over a simple item.
+        /// </summary>
+        public event ItemLeftRightEvent OnItemLeftRight;
+
+        public int menuXPos = 38; //pixels from the top
+        public int menuYPos = 38; //pixels from the left
+        public int boxWidth = 500; //width in pixels
+        public int boxScrollWidth = 4; //width in pixels
+        public int boxTitleHeight = 76; //height in pixels
+        public int boxUnderlineHeight = 1; //height in pixels
+        public int boxHeight = 38; //height in pixels
+
         /*Title Formatting*/
         public Color TitleColor = Color.FromArgb(255, 255, 255, 255);
         public Color TitleUnderlineColor = Color.FromArgb(140, 0, 255, 255);
         public Color TitleBackgroundColor = Color.FromArgb(144, 0, 0, 0);
 
         /*Title*/
-        public float TitleFont;
-        public float yPosTitleBG;
+        public float TitleFontSize;
+        protected float yPosTitleBG;
         protected float yPosTitleText;
         protected float TitleBGHeight;
         protected float UnderlineHeight;
@@ -187,17 +227,18 @@ namespace SimpleUI
         public Color HighlightedBoxColor = Color.FromArgb(255, 0, 0, 0);
 
         /*Rectangle box for UIMenuItem objects*/
-        public float xPosBG;
+        protected float xPosBG;
         protected float yPosItemBG;
-        public float MenuBGWidth;
+        protected float MenuBGWidth;
         protected float heightItemBG;
         protected float posMultiplier;
 
         protected float ItemTextFontSize;
-        protected int ItemTextFontType;
+        protected GTA.Font ItemTextFontType;
         protected float xPosItemText;
         protected float xPosRightEndOfMenu;
         protected float xPosItemValue;
+        protected float yPosItem;
         protected float yTextOffset;
 
         protected float ScrollBarWidth;
@@ -211,6 +252,7 @@ namespace SimpleUI
         bool UseScroll = true;
         int YPosBasedOnScroll;
         int YPosDescBasedOnScroll;
+        float YPosSmoothScrollBar;
         protected int MaxItemsOnScreen = 15;
         protected int minItem = 0;
         protected int maxItem = 14; //must always be 1 less than MaxItemsOnScreen
@@ -222,40 +264,96 @@ namespace SimpleUI
         private string AUDIO_SELECT = "SELECT";
         private string AUDIO_BACK = "BACK";
 
+        //protected event KeyEventHandler KeyUp;
+        //bool AcceptPressed;
+        //bool CancelPressed;
+
         public UIMenu(string title)
         {
             Title = title;
 
-            TitleFont = 0.9f; //TitleFont = 1.1f; for no-value fit.
-            yPosTitleBG = 0.050f;
-            TitleBGHeight = 0.07f; //0.046f
+            TitleFontSize = 0.9f; //TitleFont = 1.1f; for no-value fit.
             ItemTextFontSize = 0.452f;
-            ItemTextFontType = 4;
-            xPosBG = 0.22f; //xPosBG = 0.13f; for no-value fit.
-            MenuBGWidth = 0.40f; //MenuBGWidth = 0.24f; for no-value fit.
-            heightItemBG = 0.035f;
-            UnderlineHeight = 0.002f;
-            posMultiplier = 0.035f;
-            yTextOffset = 0.015f;
-            ScrollBarWidth = 0.0055f;
+            ItemTextFontType = GTA.Font.ChaletComprimeCologne;
+
             CalculateMenuPositioning();
+
+            //KeyUp += UIMenu_KeyUp;
         }
+
+        /*private void UIMenu_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (IsVisible)
+            {
+                if (e.KeyCode == Keys.NumPad5 || e.KeyCode == Keys.Enter)
+                {
+                    AcceptPressed = true;
+                    UI.ShowSubtitle("HI");
+                }
+
+                if (e.KeyCode == Keys.NumPad0 || e.KeyCode == Keys.Back)
+                {
+                    CancelPressed = true;
+                }
+            }
+        }*/
 
         public virtual void CalculateMenuPositioning()
         {
-            yPosTitleText = yPosTitleBG - (TitleFont / 35f);
+            const float height = 1080f;
+            float ratio = (float)Game.ScreenResolution.Width / Game.ScreenResolution.Height;
+            var width = height * ratio;
+
+            TitleBGHeight = boxTitleHeight / height; //0.046f
+            yPosTitleBG = ((menuYPos) / height) + TitleBGHeight * 0.5f;
+            MenuBGWidth = boxWidth / width; //MenuBGWidth = 0.24f; for no-value fit.
+            xPosBG = (menuXPos / width) + MenuBGWidth * 0.5f; //xPosBG = 0.13f; for no-value fit.
+            xPosItemText = ((menuXPos + 10) / width);
+            heightItemBG = boxHeight / height;
+            UnderlineHeight = boxUnderlineHeight / height; //0.002f;
+            posMultiplier = boxHeight / height;
+            yTextOffset = 0.015f; //offset between text pos and box pos. yPosItemBG - yTextOffset
+            ScrollBarWidth = boxScrollWidth / width;
+
+            yPosTitleText = yPosTitleBG - (TitleFontSize / 35f);
             yPosUnderline = yPosTitleBG + (TitleBGHeight / 2) + (UnderlineHeight / 2);
             yPosItemBG = yPosUnderline + (UnderlineHeight / 2) + (heightItemBG / 2); //0.0655f;
-            xPosItemText = (xPosBG - MenuBGWidth / 2) + 0.0055f;
+            yPosItem = yPosItemBG - (ItemTextFontSize / 30.13f);
+            //xPosItemText = xPosBG - (MenuBGWidth / 2) + 0.0055f;
             xPosRightEndOfMenu = xPosBG + MenuBGWidth / 2; //will Right Justify
             xPosScrollBar = xPosRightEndOfMenu - (ScrollBarWidth / 2);
             xPosItemValue = xPosScrollBar - (ScrollBarWidth / 2);
+            YPosSmoothScrollBar = yPosItemBG; //sets starting scroll bar Y pos. Will be manipulated for smooth scrolling later.
         }
 
         public void MaxItemsInMenu(int number)
         {
             MaxItemsOnScreen = number;
             maxItem = number - 1;
+        }
+
+        public void ResetIndexPosition()
+        {
+            SelectedIndex = 0;
+            minItem = 0;
+            MaxItemsInMenu(MaxItemsOnScreen);
+        }
+
+        public void SetIndexPosition(int indexPosition)
+        {
+            SelectedIndex = indexPosition;
+
+            if (SelectedIndex >= MaxItemsOnScreen)
+            {
+                //int possibleMin = SelectedIndex - MaxItemsOnScreen;
+                minItem = SelectedIndex - MaxItemsOnScreen;
+                maxItem = SelectedIndex;
+            }
+            else
+            {
+                minItem = 0;
+                maxItem = MaxItemsOnScreen - 1;
+            }
         }
 
         public void AddMenuItem(UIMenuItem item)
@@ -292,6 +390,7 @@ namespace SimpleUI
                 {
                     SelectedItem.ChangeListIndex();
                 }*/
+                //UI.ShowSubtitle("selectedIndex: " + SelectedIndex + ", minItem: " + minItem + ", maxItem: " + maxItem); //Debug
 
                 if (/*BindingMenuItem != null && NextMenu != null*/ _bindedList.Count > 0)
                 {
@@ -302,6 +401,7 @@ namespace SimpleUI
                         foreach (var bind in _bindedList.Where(bind => bind.BindedItemToSubmenu == SelectedItem))
                         {
                             bind.BindedSubmenu.IsVisible = true;
+                            //bind.BindedSubmenu.AcceptPressed = false;
                             bind.BindedSubmenu.InputTimer = DateTime.Now.AddMilliseconds(350);
                         }
 
@@ -317,11 +417,35 @@ namespace SimpleUI
                     if (ParentMenu != null)
                     {
                         ParentMenu.IsVisible = true;
+                        //ParentMenu.CancelPressed = false;
                         ParentMenu.InputTimer = DateTime.Now.AddMilliseconds(350);
                     }
 
+                    //CancelPressed = false;
                     InputTimer = DateTime.Now.AddMilliseconds(350);
                     //return;
+                }
+
+                if (UseEventBasedControls)
+                {
+                    if (JustPressedAccept())
+                    {
+                        ItemSelect(SelectedItem, SelectedIndex);
+                        InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+                        //AcceptPressed = false;
+                    }
+
+                    if (JustPressedLeft())
+                    {
+                        ItemLeftRight(SelectedItem, SelectedIndex, true);
+                        InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+                    }
+
+                    if (JustPressedRight())
+                    {
+                        ItemLeftRight(SelectedItem, SelectedIndex, false);
+                        InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+                    }
                 }
             }
         }
@@ -329,7 +453,7 @@ namespace SimpleUI
 
         protected void DisplayMenu()
         {
-            DrawCustomText(Title, TitleFont, 1, TitleColor.R, TitleColor.G, TitleColor.B, TitleColor.A, xPosBG, yPosTitleText, TextJustification.Center); //Draw title text
+            DrawCustomText(Title, TitleFontSize, GTA.Font.HouseScript, TitleColor.R, TitleColor.G, TitleColor.B, TitleColor.A, xPosBG, yPosTitleText, TextJustification.Center); //Draw title text
             DrawRectangle(xPosBG, yPosTitleBG, MenuBGWidth, TitleBGHeight, TitleBackgroundColor.R, TitleBackgroundColor.G, TitleBackgroundColor.B, TitleBackgroundColor.A); //Draw main rectangle
             DrawRectangle(xPosBG, yPosUnderline, MenuBGWidth, UnderlineHeight, TitleUnderlineColor.R, TitleUnderlineColor.G, TitleUnderlineColor.B, TitleUnderlineColor.A); //Draw rectangle as underline of title
 
@@ -343,30 +467,38 @@ namespace SimpleUI
 
                     if (_itemList.IndexOf(item) == SelectedIndex)
                     {
-                        DrawCustomText(item.Text, ItemTextFontSize, ItemTextFontType, HighlightedItemTextColor.R, HighlightedItemTextColor.G, HighlightedItemTextColor.B, HighlightedItemTextColor.A, xPosItemText, yPosItemBG - yTextOffset + YPosBasedOnScroll * posMultiplier); //Draw highlighted item text
+                        DrawCustomText(item.Text, ItemTextFontSize, ItemTextFontType, HighlightedItemTextColor.R, HighlightedItemTextColor.G, HighlightedItemTextColor.B, HighlightedItemTextColor.A, xPosItemText, yPosItem + YPosBasedOnScroll * posMultiplier); //Draw highlighted item text
 
                         if (item.Value != null)
-                        { DrawCustomText(Convert.ToString(item.Value), ItemTextFontSize, ItemTextFontType, HighlightedItemTextColor.R, HighlightedItemTextColor.G, HighlightedItemTextColor.B, HighlightedItemTextColor.A, xPosItemValue, yPosItemBG - yTextOffset + YPosBasedOnScroll * posMultiplier, TextJustification.Right); } //Draw highlighted item value
+                        { DrawCustomText(Convert.ToString(item.Value), ItemTextFontSize, ItemTextFontType, HighlightedItemTextColor.R, HighlightedItemTextColor.G, HighlightedItemTextColor.B, HighlightedItemTextColor.A, xPosItemValue, yPosItem + YPosBasedOnScroll * posMultiplier, TextJustification.Right); } //Draw highlighted item value
 
                         DrawRectangle(xPosBG, yPosItemBG + YPosBasedOnScroll * posMultiplier, MenuBGWidth, heightItemBG, HighlightedBoxColor.R, HighlightedBoxColor.G, HighlightedBoxColor.B, HighlightedBoxColor.A); //Draw rectangle over highlighted text
 
                         if (item.Description != null)
                         {
-                            foreach (string desc in item.DescriptionTexts)
+                            /*foreach (string desc in item.DescriptionTexts)
                             {
-                                DrawCustomText(desc, ItemTextFontSize, ItemTextFontType, DescriptionTextColor.R, DescriptionTextColor.G, DescriptionTextColor.B, DescriptionTextColor.A, xPosItemText, yPosItemBG - yTextOffset + (item.DescriptionTexts.IndexOf(desc) + YPosDescBasedOnScroll) * posMultiplier, TextJustification.Left, false); // Draw description text at bottom of menu
+                                DrawCustomText(desc, ItemTextFontSize, ItemTextFontType, DescriptionTextColor.R, DescriptionTextColor.G, DescriptionTextColor.B, DescriptionTextColor.A, xPosItemText, yPosItem + (item.DescriptionTexts.IndexOf(desc) + YPosDescBasedOnScroll) * posMultiplier, TextJustification.Left, false); // Draw description text at bottom of menu
                                 DrawRectangle(xPosBG, yPosItemBG + (item.DescriptionTexts.IndexOf(desc) + YPosDescBasedOnScroll) * posMultiplier, MenuBGWidth, heightItemBG, DescriptionBoxColor.R, DescriptionBoxColor.G, DescriptionBoxColor.B, DescriptionBoxColor.A); //Draw rectangle over description text at bottom of the list.
+                            }*/
+
+                            DrawCustomText(item.Description, ItemTextFontSize, ItemTextFontType, DescriptionTextColor.R, DescriptionTextColor.G, DescriptionTextColor.B, DescriptionTextColor.A, xPosItemText, yPosItem + YPosDescBasedOnScroll * posMultiplier, TextJustification.Left, true); // Draw description text at bottom of menu
+                            float numLines = item.DescriptionWidth / (boxWidth - 10);
+                            for (int l = 0; l < (int)Math.Ceiling(numLines); l++)
+                            {
+                                DrawRectangle(xPosBG, yPosItemBG + (l + YPosDescBasedOnScroll) * posMultiplier, MenuBGWidth, heightItemBG, DescriptionBoxColor.R, DescriptionBoxColor.G, DescriptionBoxColor.B, DescriptionBoxColor.A); //Draw rectangle over description text at bottom of the list.
                             }
+                            //UI.ShowSubtitle(numLines.ToString());
                         }
 
                         SelectedItem = item;
                     }
                     else
                     {
-                        DrawCustomText(item.Text, ItemTextFontSize, ItemTextFontType, DefaultTextColor.R, DefaultTextColor.G, DefaultTextColor.B, DefaultTextColor.A, xPosItemText, yPosItemBG - yTextOffset + YPosBasedOnScroll * posMultiplier); //Draw item text
+                        DrawCustomText(item.Text, ItemTextFontSize, ItemTextFontType, DefaultTextColor.R, DefaultTextColor.G, DefaultTextColor.B, DefaultTextColor.A, xPosItemText, yPosItem + YPosBasedOnScroll * posMultiplier); //Draw item text
 
                         if (item.Value != null)
-                        { DrawCustomText(Convert.ToString(item.Value), ItemTextFontSize, ItemTextFontType, DefaultTextColor.R, DefaultTextColor.G, DefaultTextColor.B, DefaultTextColor.A, xPosItemValue, yPosItemBG - yTextOffset + YPosBasedOnScroll * posMultiplier, TextJustification.Right); } //Draw item value
+                        { DrawCustomText(Convert.ToString(item.Value), ItemTextFontSize, ItemTextFontType, DefaultTextColor.R, DefaultTextColor.G, DefaultTextColor.B, DefaultTextColor.A, xPosItemValue, yPosItem + YPosBasedOnScroll * posMultiplier, TextJustification.Right); } //Draw item value
 
                         DrawRectangle(xPosBG, yPosItemBG + YPosBasedOnScroll * posMultiplier, MenuBGWidth, heightItemBG, DefaultBoxColor.R, DefaultBoxColor.G, DefaultBoxColor.B, DefaultBoxColor.A); //Draw background rectangles around all items.
                     }
@@ -418,10 +550,10 @@ namespace SimpleUI
         {
             if (UseScroll && _itemList.Count > MaxItemsOnScreen)
             {
-                //Top Y: 0.0632f
-                //Bottom Y: 0.2840f
+                YPosSmoothScrollBar = CalculateSmoothPosition(YPosSmoothScrollBar, CalculateScroll(SelectedIndex, 0, _itemList.Count - 1, yPosItemBG, yPosItemBG + (MaxItemsOnScreen - 1) * posMultiplier), 0.0005f, yPosItemBG, yPosItemBG + (MaxItemsOnScreen - 1) * posMultiplier);
+                DrawRectangle(xPosScrollBar, YPosSmoothScrollBar, ScrollBarWidth, heightItemBG, TitleUnderlineColor.R, TitleUnderlineColor.G, TitleUnderlineColor.B, TitleUnderlineColor.A);
 
-                DrawRectangle(/*xPosBG - 0.00275f + MenuBGWidth / 2*/ xPosScrollBar, CalculateScroll(SelectedIndex, 0, _itemList.Count - 1, yPosItemBG, yPosItemBG + (MaxItemsOnScreen - 1) * posMultiplier), ScrollBarWidth, heightItemBG, TitleUnderlineColor.R, TitleUnderlineColor.G, TitleUnderlineColor.B, TitleUnderlineColor.A);
+                //DrawRectangle(xPosScrollBar, CalculateScroll(SelectedIndex, 0, _itemList.Count - 1, yPosItemBG, yPosItemBG + (MaxItemsOnScreen - 1) * posMultiplier), ScrollBarWidth, heightItemBG, TitleUnderlineColor.R, TitleUnderlineColor.G, TitleUnderlineColor.B, TitleUnderlineColor.A);
             }
         }
 
@@ -467,6 +599,33 @@ namespace SimpleUI
             return relativeValue;
         }
 
+        float CalculateSmoothPosition(float currentPosition, float desiredPosition, float step, float min, float max)
+        {
+            if (currentPosition == desiredPosition) return currentPosition;
+
+            if (currentPosition < desiredPosition)
+            {
+                //currentPosition += (desiredPosition - currentPosition) * 0.1f;
+                currentPosition += (desiredPosition - currentPosition) * 5f * Game.LastFrameTime;
+                if (currentPosition > max)
+                {
+                    currentPosition = max;
+                }
+                return currentPosition;
+            }
+            else if (currentPosition > desiredPosition)
+            {
+                //currentPosition -= (currentPosition - desiredPosition) * 0.1f;
+                currentPosition -= (currentPosition - desiredPosition) * 5f * Game.LastFrameTime;
+                if (currentPosition < min)
+                {
+                    currentPosition = min;
+                }
+                return currentPosition;
+            }
+            return currentPosition;
+        }
+
         enum TextJustification
         {
             Center = 0,
@@ -474,10 +633,11 @@ namespace SimpleUI
             Right //requires SET_TEXT_WRAP
         }
 
-        void DrawCustomText(string Message, float FontSize, int FontType, int Red, int Green, int Blue, int Alpha, float XPos, float YPos, TextJustification justifyType = TextJustification.Left, bool ForceTextWrap = false)
+        void DrawCustomText(string Message, float FontSize, GTA.Font FontType, int Red, int Green, int Blue, int Alpha, float XPos, float YPos, TextJustification justifyType = TextJustification.Left, bool ForceTextWrap = false)
         {
-            Function.Call(Hash.SET_TEXT_SCALE, 0.0f, FontSize);
-            Function.Call(Hash.SET_TEXT_FONT, FontType);
+            Function.Call(Hash._SET_TEXT_ENTRY, "jamyfafi"); //Required, don't change this! AKA BEGIN_TEXT_COMMAND_DISPLAY_TEXT
+            Function.Call(Hash.SET_TEXT_SCALE, 1.0f, FontSize);
+            Function.Call(Hash.SET_TEXT_FONT, (int)FontType);
             Function.Call(Hash.SET_TEXT_COLOUR, Red, Green, Blue, Alpha);
             //Function.Call(Hash.SET_TEXT_DROPSHADOW, 0, 0, 0, 0, 0);
             Function.Call(Hash.SET_TEXT_JUSTIFICATION, (int)justifyType);
@@ -485,11 +645,11 @@ namespace SimpleUI
             {
                 Function.Call(Hash.SET_TEXT_WRAP, xPosItemText, xPosItemValue);
             }
-            Function.Call(Hash._SET_TEXT_ENTRY, "STRING"); //Required, don't change this! AKA BEGIN_TEXT_COMMAND_DISPLAY_TEXT
-            //Function.Call(Hash._0x54CE8AC98E120CAB, "STRING"); //Required, don't change this! AKA BEGIN_TEXT_COMMAND_WIDTH
-            Function.Call(Hash._ADD_TEXT_COMPONENT_STRING, Message);
+
+            //Function.Call(Hash._ADD_TEXT_COMPONENT_STRING, Message);
+            StringHelper.AddLongString(Message);
+
             Function.Call(Hash._DRAW_TEXT, XPos, YPos); //AKA END_TEXT_COMMAND_DISPLAY_TEXT
-            //Function.Call<float>(Hash._0x85F061DA64ED2F67, XPos, YPos); //AKA END_TEXT_COMMAND_GET_WIDTH
         }
 
         void DrawRectangle(float BgXpos, float BgYpos, float BgWidth, float BgHeight, int bgR, int bgG, int bgB, int bgA)
@@ -568,9 +728,9 @@ namespace SimpleUI
             }
         }
 
-        List<Control> ControlsToDisable = new List<Control>
+        List<Control> ControlsToEnable = new List<Control>
             {
-                Control.FrontendAccept,
+                /*Control.FrontendAccept,
                 Control.FrontendAxisX,
                 Control.FrontendAxisY,
                 Control.FrontendDown,
@@ -583,41 +743,55 @@ namespace SimpleUI
                 Control.CursorScrollDown,
                 Control.CursorScrollUp,
                 Control.CursorX,
-                Control.CursorY,
-                /*Control.MoveUpDown,
+                Control.CursorY,*/
+                Control.MoveUpDown,
                 Control.MoveLeftRight,
                 Control.Sprint,
-                Control.Jump,*/
+                Control.Jump,
                 Control.Enter,
                 Control.VehicleExit,
-                //Control.VehicleAccelerate,
-                //Control.VehicleBrake,
-                //Control.VehicleMoveLeftRight,
+                Control.VehicleAccelerate,
+                Control.VehicleBrake,
+                Control.VehicleMoveLeftRight,
                 Control.VehicleFlyYawLeft,
                 Control.FlyLeftRight,
                 Control.FlyUpDown,
                 Control.VehicleFlyYawRight,
-                //Control.VehicleHandbrake,
-                Control.VehicleRadioWheel,
+                Control.VehicleHandbrake,
+                /*Control.VehicleRadioWheel,
                 Control.VehicleRoof,
                 Control.VehicleHeadlight,
                 Control.VehicleCinCam,
                 Control.Phone,
+                Control.MeleeAttack1,
+                Control.MeleeAttack2,
+                Control.Attack,
+                Control.Attack2*/
+                Control.LookUpDown,
+                Control.LookLeftRight
             };
 
         protected void DisableControls()
         {
-            foreach (var con in ControlsToDisable)
+            Game.DisableAllControlsThisFrame(2);
+
+            foreach (var con in ControlsToEnable)
             {
-                Game.DisableControlThisFrame(0, con);
-                Game.DisableControlThisFrame(1, con);
-                Game.DisableControlThisFrame(2, con);
+                Game.EnableControlThisFrame(2, con);
+
+
+
             }
+        }
+
+        bool IsGamepad()
+        {
+            return Game.CurrentInputMode == InputMode.GamePad;
         }
 
         public bool JustPressedUp()
         {
-            if (Game.IsControlPressed(2, Control.PhoneUp) || Game.IsKeyPressed(Keys.NumPad8) || Game.IsKeyPressed(Keys.Up))
+            if ((IsGamepad() && Game.IsControlPressed(2, Control.PhoneUp)) || Game.IsKeyPressed(Keys.NumPad8) || Game.IsKeyPressed(Keys.Up))
             {
                 if (InputTimer < DateTime.Now)
                 {
@@ -630,7 +804,7 @@ namespace SimpleUI
 
         public bool JustPressedDown()
         {
-            if (Game.IsControlPressed(2, Control.PhoneDown) || Game.IsKeyPressed(Keys.NumPad2) || Game.IsKeyPressed(Keys.Down))
+            if ((IsGamepad() && Game.IsControlPressed(2, Control.PhoneDown)) || Game.IsKeyPressed(Keys.NumPad2) || Game.IsKeyPressed(Keys.Down))
             {
                 if (InputTimer < DateTime.Now)
                 {
@@ -643,7 +817,7 @@ namespace SimpleUI
 
         public bool JustPressedLeft()
         {
-            if (Game.IsControlPressed(2, Control.PhoneLeft) || Game.IsKeyPressed(Keys.NumPad4) || Game.IsKeyPressed(Keys.Left))
+            if ((IsGamepad() && Game.IsControlPressed(2, Control.PhoneLeft)) || Game.IsKeyPressed(Keys.NumPad4) || Game.IsKeyPressed(Keys.Left))
             {
                 if (InputTimer < DateTime.Now)
                 {
@@ -656,7 +830,7 @@ namespace SimpleUI
 
         public bool JustPressedRight()
         {
-            if (Game.IsControlPressed(2, Control.PhoneRight) || Game.IsKeyPressed(Keys.NumPad6) || Game.IsKeyPressed(Keys.Right))
+            if ((IsGamepad() && Game.IsControlPressed(2, Control.PhoneRight)) || Game.IsKeyPressed(Keys.NumPad6) || Game.IsKeyPressed(Keys.Right))
             {
                 if (InputTimer < DateTime.Now)
                 {
@@ -666,6 +840,28 @@ namespace SimpleUI
             }
             return false;
         }
+
+        /*public bool JustPressedAccept()
+        {
+            if ((IsGamepad() && Game.IsControlJustPressed(2, Control.PhoneSelect)) || AcceptPressed)
+            {
+                Game.PlaySound(AUDIO_SELECT, AUDIO_LIBRARY);
+                //AcceptPressed = false;
+                return true;
+            }
+            return false;
+        }
+
+        public bool JustPressedCancel()
+        {
+            if ((IsGamepad() && Game.IsControlJustPressed(2, Control.PhoneCancel)) || CancelPressed)
+            {
+                Game.PlaySound(AUDIO_BACK, AUDIO_LIBRARY);
+                //CancelPressed = false;
+                return true;
+            }
+            return false;
+        }*/
 
         public bool JustPressedAccept()
         {
@@ -697,13 +893,13 @@ namespace SimpleUI
 
         bool IsHoldingSpeedupControl()
         {
-            if (Game.CurrentInputMode == InputMode.GamePad)
+            if (IsGamepad())
             {
                 return Game.IsControlPressed(2, Control.VehicleHandbrake);
             }
             else
             {
-                return Game.IsControlPressed(2, Control.Sprint);
+                return Game.IsKeyPressed(Keys.ShiftKey);
             }
         }
 
@@ -714,9 +910,25 @@ namespace SimpleUI
 
         public bool ControlBoolValue(UIMenuItem item, bool boolToControl)
         {
+            if (IsVisible && SelectedItem == item)
+            {
+                //if (JustPressedAccept())
+                //{
+                boolToControl = !boolToControl;
+                item.Value = boolToControl;
+                //InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+                return boolToControl;
+                //}
+            }
+            item.Value = boolToControl;
+            return boolToControl;
+        }
+
+        public bool ControlBoolValue_NoEvent(UIMenuItem item, bool boolToControl)
+        {
             item.Value = boolToControl;
 
-            if (SelectedItem == item)
+            if (IsVisible && SelectedItem == item)
             {
                 if (JustPressedAccept())
                 {
@@ -729,11 +941,59 @@ namespace SimpleUI
             return boolToControl;
         }
 
-        public float ControlFloatValue(UIMenuItem item, float numberToControl, float incrementValue, float incrementValueFast, int decimals = 2)
+        public float ControlFloatValue(UIMenuItem item, bool left, float numberToControl, float incrementValue, float incrementValueFast, int decimals = 2, bool limit = false, float min = 0f, float max = 1f)
+        {
+            if (IsVisible && SelectedItem == item)
+            {
+                if (left)
+                {
+                    if (IsHoldingSpeedupControl())
+                    {
+                        numberToControl -= incrementValueFast;
+                    }
+                    else
+                    {
+                        numberToControl -= incrementValue;
+                    }
+                }
+                if (!left)
+                {
+                    if (IsHoldingSpeedupControl())
+                    {
+                        numberToControl += incrementValueFast;
+                    }
+                    else
+                    {
+                        numberToControl += incrementValue;
+                    }
+                }
+                if (limit)
+                {
+                    if (numberToControl < min)
+                    {
+                        numberToControl = min;
+                    }
+                    if (numberToControl > max)
+                    {
+                        numberToControl = max;
+                    }
+                }
+
+                item.Value = "< " + numberToControl + " >";
+
+                //InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+
+                return (float)Math.Round(numberToControl, decimals);
+            }
+            item.Value = "< " + numberToControl + " >";
+            return numberToControl;
+        }
+
+        public float ControlFloatValue_NoEvent(UIMenuItem item, float numberToControl, float incrementValue, float incrementValueFast, int decimals = 2, bool limit = false, float min = 0f, float max = 1f)
         {
             item.Value = "< " + numberToControl + " >";
 
-            if (SelectedItem == item)
+            if (IsVisible && SelectedItem == item)
             {
                 if (JustPressedLeft())
                 {
@@ -744,6 +1004,18 @@ namespace SimpleUI
                     else
                     {
                         numberToControl -= incrementValue;
+                    }
+
+                    if (limit)
+                    {
+                        if (numberToControl < min)
+                        {
+                            numberToControl = min;
+                        }
+                        if (numberToControl > max)
+                        {
+                            numberToControl = max;
+                        }
                     }
 
                     item.Value = "< " + numberToControl + " >";
@@ -761,6 +1033,18 @@ namespace SimpleUI
                     else
                     {
                         numberToControl += incrementValue;
+                    }
+
+                    if (limit)
+                    {
+                        if (numberToControl < min)
+                        {
+                            numberToControl = min;
+                        }
+                        if (numberToControl > max)
+                        {
+                            numberToControl = max;
+                        }
                     }
 
                     item.Value = "< " + numberToControl + " >";
@@ -773,11 +1057,58 @@ namespace SimpleUI
             return numberToControl;
         }
 
-        public int ControlIntValue(UIMenuItem item, int numberToControl, int incrementValue, int incrementValueFast)
+        public int ControlIntValue(UIMenuItem item, bool left, int numberToControl, int incrementValue, int incrementValueFast, bool limit = false, int min = 0, int max = 100)
+        {
+            if (IsVisible && SelectedItem == item)
+            {
+                if (left)
+                {
+                    if (IsHoldingSpeedupControl())
+                    {
+                        numberToControl -= incrementValueFast;
+                    }
+                    else
+                    {
+                        numberToControl -= incrementValue;
+                    }
+                }
+                if (!left)
+                {
+                    if (IsHoldingSpeedupControl())
+                    {
+                        numberToControl += incrementValueFast;
+                    }
+                    else
+                    {
+                        numberToControl += incrementValue;
+                    }
+                }
+                if (limit)
+                {
+                    if (numberToControl < min)
+                    {
+                        numberToControl = min;
+                    }
+                    else if (numberToControl > max)
+                    {
+                        numberToControl = max;
+                    }
+                }
+
+                item.Value = "< " + numberToControl + " >";
+
+                //InputTimer = DateTime.Now.AddMilliseconds(InputWait);
+
+            }
+            item.Value = "< " + numberToControl + " >";
+            return numberToControl;
+        }
+
+        public int ControlIntValue_NoEvent(UIMenuItem item, int numberToControl, int incrementValue, int incrementValueFast, bool limit = false, int min = 0, int max = 100)
         {
             item.Value = "< " + numberToControl + " >";
 
-            if (SelectedItem == item)
+            if (IsVisible && SelectedItem == item)
             {
                 if (JustPressedLeft())
                 {
@@ -788,6 +1119,18 @@ namespace SimpleUI
                     else
                     {
                         numberToControl -= incrementValue;
+                    }
+
+                    if (limit)
+                    {
+                        if (numberToControl < min)
+                        {
+                            numberToControl = min;
+                        }
+                        if (numberToControl > max)
+                        {
+                            numberToControl = max;
+                        }
                     }
 
                     item.Value = "< " + numberToControl + " >";
@@ -807,6 +1150,18 @@ namespace SimpleUI
                         numberToControl += incrementValue;
                     }
 
+                    if (limit)
+                    {
+                        if (numberToControl < min)
+                        {
+                            numberToControl = min;
+                        }
+                        if (numberToControl > max)
+                        {
+                            numberToControl = max;
+                        }
+                    }
+
                     item.Value = "< " + numberToControl + " >";
 
                     InputTimer = DateTime.Now.AddMilliseconds(InputWait);
@@ -815,6 +1170,16 @@ namespace SimpleUI
                 }
             }
             return numberToControl;
+        }
+
+        protected virtual void ItemSelect(UIMenuItem selecteditem, int index)
+        {
+            OnItemSelect?.Invoke(this, selecteditem, index);
+        }
+
+        protected virtual void ItemLeftRight(UIMenuItem selecteditem, int index, bool left)
+        {
+            OnItemLeftRight?.Invoke(this, selecteditem, index, left);
         }
     }
 
@@ -822,37 +1187,12 @@ namespace SimpleUI
     {
         public UIMenuDisplayOnly(string text) : base(text)
         {
-            base.TitleFont = 0.5f;
-            base.yPosTitleBG = 0.50f;
-            base.yPosTitleText = yPosTitleBG - (TitleFont / 35f);
-            base.TitleBGHeight = 0.04f; //0.046f
-            base.xPosBG = 0.125f;
-            base.MenuBGWidth = 0.20f;
-            base.heightItemBG = 0.025f;
-            base.UnderlineHeight = 0.002f;
-            base.yPosUnderline = yPosTitleBG + (TitleBGHeight / 2) + (UnderlineHeight / 2);
-            base.yPosItemBG = yPosUnderline + (UnderlineHeight / 2) + (heightItemBG / 2); //0.0655f;
-            base.posMultiplier = 0.025f;
-            base.yTextOffset = 0.015f;
-            base.xPosItemText = xPosBG - MenuBGWidth / 2;
-            base.xPosRightEndOfMenu = xPosBG + MenuBGWidth / 2; //will Right Justify
-            base.ScrollBarWidth = 0.0055f;
-            base.xPosScrollBar = xPosRightEndOfMenu - (ScrollBarWidth / 2);
-            base.xPosItemValue = xPosScrollBar - (ScrollBarWidth / 2);
+            base.TitleFontSize = 0.5f;
+            base.boxWidth = 400;
+
             CalculateMenuPositioning();
 
             MaxItemsInMenu(8);
-        }
-
-        public override void CalculateMenuPositioning()
-        {
-            yPosTitleText = yPosTitleBG - (TitleFont / 35f);
-            yPosUnderline = yPosTitleBG + (TitleBGHeight / 2) + (UnderlineHeight / 2);
-            yPosItemBG = yPosUnderline + (UnderlineHeight / 2) + (heightItemBG / 2); //0.0655f;
-            xPosItemText = xPosBG - MenuBGWidth / 2;
-            xPosRightEndOfMenu = xPosBG + MenuBGWidth / 2; //will Right Justify
-            xPosScrollBar = xPosRightEndOfMenu - (ScrollBarWidth / 2);
-            xPosItemValue = xPosScrollBar - (ScrollBarWidth / 2);
         }
 
         public override void Draw()
@@ -912,6 +1252,7 @@ namespace SimpleUI
         dynamic _value { get; set; }
         string _description { get; set; }
         public List<string> DescriptionTexts;
+        public float DescriptionWidth { get; set; }
 
         public UIMenuItem(string text)
         {
@@ -929,7 +1270,10 @@ namespace SimpleUI
             _text = text;
             _value = value;
             _description = description;
-            DescriptionTexts = description.SplitOn(90);
+            //DescriptionTexts = description.SplitOn(90);
+
+            if (_description != null)
+            { DescriptionWidth = StringHelper.MeasureStringWidth(_description, GTA.Font.ChaletComprimeCologne, 0.452f); }
         }
 
         public string Text
@@ -947,10 +1291,70 @@ namespace SimpleUI
         public string Description
         {
             get { return _description; }
-            set { DescriptionTexts = value.SplitOn(90); _description = value; }
+            set
+            {
+                //DescriptionTexts = value.SplitOn(90);
+
+                if (value != null)
+                { DescriptionWidth = StringHelper.MeasureStringWidth(value, GTA.Font.ChaletComprimeCologne, 0.452f); }
+
+                _description = value;
+            }
         }
 
         public virtual void ChangeListIndex() { }
+    }
+
+    public static class StringHelper
+    {
+        public static void AddLongString(string str)
+        {
+            const int strLen = 99;
+            for (int i = 0; i < str.Length; i += strLen)
+            {
+                string substr = str.Substring(i, Math.Min(strLen, str.Length - i));
+                Function.Call(Hash._ADD_TEXT_COMPONENT_STRING, substr); //ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME
+            }
+        }
+
+        public static float MeasureStringWidth(string str, GTA.Font font, float fontsize)
+        {
+            //int screenw = 2560;// Game.ScreenResolution.Width;
+            //int screenh = 1440;// Game.ScreenResolution.Height;
+            const float height = 1080f;
+            float ratio = (float)Game.ScreenResolution.Width / Game.ScreenResolution.Height;
+            float width = height * ratio;
+            return MeasureStringWidthNoConvert(str, font, fontsize) * width;
+        }
+
+        private static float MeasureStringWidthNoConvert(string str, GTA.Font font, float fontsize)
+        {
+            Function.Call((Hash)0x54CE8AC98E120CAB, "jamyfafi"); //_BEGIN_TEXT_COMMAND_WIDTH
+            AddLongString(str);
+            Function.Call(Hash.SET_TEXT_FONT, (int)font);
+            Function.Call(Hash.SET_TEXT_SCALE, fontsize, fontsize);
+            return Function.Call<float>(Hash._0x85F061DA64ED2F67, true); //_END_TEXT_COMMAND_GET_WIDTH //Function.Call<float>((Hash)0x85F061DA64ED2F67, (int)font) * fontsize; //_END_TEXT_COMMAND_GET_WIDTH
+        }
+    }
+
+    public class UIMenuNumberValueItem : UIMenuItem
+    {
+        public UIMenuNumberValueItem(string text, dynamic value) : base(text, (object)value)
+        {
+            this.Text = text;
+            this.Value = "< " + value + " >";
+        }
+
+        public UIMenuNumberValueItem(string text, dynamic value, string description) : base(text, (object)value, description)
+        {
+            this.Text = text;
+            this.Value = "< " + value + " >";
+            this.Description = description;
+            //DescriptionTexts = description.SplitOn(90);
+
+            if (description != null)
+            { DescriptionWidth = StringHelper.MeasureStringWidth(description, GTA.Font.ChaletComprimeCologne, 0.452f); }
+        }
     }
 
     /*public class UIMenuListItem : UIMenuItem
